@@ -258,11 +258,6 @@ assign USER_PP  = USER_PP_DRIVE;
 localparam CONF_STR = {
 	"MSX1;;",
 	"-;",
-	// [MiSTer-DB9-Pro BEGIN] - Saturn-first joy_type (canonical bit notation)
-	"O[127:126],UserIO Joystick,Off,Saturn,DB9MD,DB15;",
-	"O[125],UserIO Players, 1 Player,2 Players;",
-	// [MiSTer-DB9-Pro END]
-	"-;",
 	"h2OHK,SLOT A,ROM mapper auto,ROM mapper none,ROM mapper gamemaster2,ROM mapper Konami,ROM mapper KonamiSCC,ROM mapper ASCII8,ROM mapper ASCII16,ROM mapper linear64k,ROM mapper R-TYPE,FDD VY0010;",   
 	"H2OHK,SLOT A,Empty,FDD VY0010,Gamemaster2;",
 	"h1S0,DSK,Mount Drive A:;",
@@ -282,6 +277,11 @@ localparam CONF_STR = {
 	"P1OAB,Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",	
 	"P2,Advanced settings;",
 	"P2F1,ROM,Load BIOS;",	
+	"-;",
+	// [MiSTer-DB9-Pro BEGIN] - Saturn-first joy_type (canonical bit notation)
+	"O[127:126],UserIO Joystick,Off,Saturn,DB9MD,DB15;",
+	"O[125],UserIO Players, 1 Player,2 Players;",
+	// [MiSTer-DB9-Pro END]
 	"-;",
 	"T0,Reset;",
 	"RF,Reset & Detach ROM Cartridge;",
