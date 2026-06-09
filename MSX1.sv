@@ -313,8 +313,8 @@ wire [127:0] status;
 wire [10:0] ps2_key;
 // [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: joydb joystick composition (6-bit, like MSX)
 wire [5:0]  joy0_USB, joy1_USB;
-wire [5:0]  joy0 = joydb_1ena ? (OSD_STATUS ? 6'd0 : {joydb_1[6],joydb_1[5]|joydb_1[4],joydb_1[3:0]}) : joy0_USB;
-wire [5:0]  joy1 = joydb_2ena ? (OSD_STATUS ? 6'd0 : {joydb_2[6],joydb_2[5]|joydb_2[4],joydb_2[3:0]}) : joydb_1ena ? joy0_USB : joy1_USB;
+wire [5:0]  joy0 = joydb_1ena ? (OSD_STATUS ? 6'd0 : joydb_1_mapped[5:0]) : joy0_USB;
+wire [5:0]  joy1 = joydb_2ena ? (OSD_STATUS ? 6'd0 : joydb_2_mapped[5:0]) : joydb_1ena ? joy0_USB : joy1_USB;
 // [MiSTer-DB9 END]
 wire        ioctl_download;
 wire [15:0] ioctl_index;
