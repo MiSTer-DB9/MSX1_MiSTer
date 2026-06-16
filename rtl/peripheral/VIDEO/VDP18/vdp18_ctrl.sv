@@ -60,11 +60,14 @@ module vdp18_ctrl (
   output access_t    access_type_o,
   output logic       vert_active_o,
   output logic       hor_active_o,
-  output logic       irq_o
+  output logic       irq_o,
+  output logic       window_v_o,
+  output logic       window_h_o
 );
 
 
   logic vert_active_q, hor_active_q;
+  logic window_v_q, window_h_q;
   logic sprite_active_q, sprite_line_act_q;
   
   access_t access_type_s;
@@ -141,6 +144,7 @@ module vdp18_ctrl (
       vert_active_q     <= 1'b0;
       sprite_active_q   <= 1'b0;
       sprite_line_act_q <= 1'b0;
+      window_v_q        <= 1'b0;
     end else if (clk_en_5m37_i) begin
       if (sprite_active_q) begin
         if (vert_inc_i) sprite_line_act_q <= 1'b1;
@@ -160,6 +164,8 @@ module vdp18_ctrl (
         if (reg_blank_i) vert_active_q <= 1'b0;
         else if (num_line_i == -1) vert_active_q <= 1'b1;
         else if (num_line_i == 191) vert_active_q <= 1'b0;
+        if (num_line_i == -1) window_v_q <= 1'b1;
+        else if (num_line_i == 191) window_v_q <= 1'b0;
       end
       if (stop_sprite_i) sprite_line_act_q <= 1'b0;
     end
@@ -169,12 +175,24 @@ module vdp18_ctrl (
   always_ff @(posedge clk_i or posedge reset_i) begin
     if (reset_i) begin
       hor_active_q <= 1'b0;
+      window_h_q   <= 1'b0;
     end else if (clk_en_5m37_i) begin
-      if (!reg_blank_i && num_pix_i == -1) hor_active_q <= 1'b1;
+      if (num_pix_i == -1) begin
+        window_h_q   <= 1'b1;
+        if (!reg_blank_i) begin
+          hor_active_q <= 1'b1;
+        end
+      end
       if (opmode_i == OPMODE_TEXTM) begin
-        if (num_pix_i == 239) hor_active_q <= 1'b0;
+        if (num_pix_i == 239) begin 
+          hor_active_q <= 1'b0;
+          window_h_q   <= 1'b0;
+        end
       end else begin
-        if (num_pix_i == 255) hor_active_q <= 1'b0;
+        if (num_pix_i == 255) begin 
+          hor_active_q <= 1'b0;
+          window_h_q   <= 1'b0;
+        end
       end
     end
   end
@@ -185,5 +203,7 @@ module vdp18_ctrl (
   assign vert_active_o = vert_active_q;
   assign hor_active_o  = hor_active_q;
   assign irq_o         = vert_inc_i && (num_line_i == 9'sd191);
+  assign window_v_o    = window_v_q;
+  assign window_h_o    = window_h_q;
 
 endmodule

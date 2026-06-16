@@ -67,6 +67,7 @@
 );
 
 device_bus device_bus();
+block_info block_info();
 cpu_bus_if cpu_bus(clock_bus.clk, reset);
 memory_bus_if memory_bus_slots();
 memory_bus_if memory_bus_devices();
@@ -240,6 +241,7 @@ devices #(.sysCLK(sysCLK)) devices
    .data_oe_rq(device_oe_rq),
    .data_to_mapper(data_to_mapper),
    .memory_bus(memory_bus_devices),
+   .block_info(block_info),
    .vram_bus(vram_bus),
    .video_bus(video_bus),
    .cpu_interrupt(cpu_interrupt),
@@ -279,6 +281,7 @@ msx_slots msx_slots
    .data(d_from_slots),
    .data_oe_rq(slot_oe_rq),
    .memory_bus(memory_bus_slots),
+   .block_info(block_info),
    .active_slot(active_slot),
    .data_to_mapper(data_to_mapper),
    .ocm_megaSD_enable(ocm_megaSD_enable),

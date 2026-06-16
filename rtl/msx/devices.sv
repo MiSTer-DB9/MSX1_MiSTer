@@ -44,6 +44,7 @@ module devices  #(parameter sysCLK)
     video_bus_if.device_mp  video_bus,
     vram_bus_if.device_mp   vram_bus,
     memory_bus_if.device_mp memory_bus,
+    block_info              block_info,
     input MSX::io_device_t  io_device[32][3],                       // Array of IO devices
     input MSX::io_device_mem_ref_t io_memory[8],                    // Array of memory references
     input MSX::kb_memory_t  kb_upload_memory,
@@ -78,8 +79,8 @@ module devices  #(parameter sysCLK)
     vram_bus_if             vram_bus_v99();
 
     // Výstupy kombinující jednotlivé zařízení
-    assign sound_L = opll_sound + scc_sound + psg_sound + opm_sound_L;
-    assign sound_R = opll_sound + scc_sound + psg_sound + opm_sound_R;
+    assign sound_L = opll_sound + scc_sound + psg_sound + opm_sound_L + dac_sound;
+    assign sound_R = opll_sound + scc_sound + psg_sound + opm_sound_R + dac_sound;
     assign data = scc_data & fdc_data & msx2_ram_data & tms_data & v99_data & rtc_data & psg_data & ppi_data & ocm_data & reset_status_data & opm_data & ym2148_data;// & TC8566AF_data;
     assign data_oe_rq = fdc_data_oe_rq;// | TC8566AF_data_oe_rq;
     assign data_to_mapper = msx2_ram_data_to_mapper & latch_port_data_to_mapper;
@@ -280,6 +281,16 @@ module devices  #(parameter sysCLK)
         .data(psg_data),
         .joy(joy),
         .tape_in(tape_in)
+    );
+
+    wire signed [15:0] dac_sound;
+    dev_dac dev_dac
+    (
+        .cpu_bus(cpu_bus),
+        .clock_bus(clock_bus),
+        .block_info(block_info),
+        .io_device(io_device[DEV_DAC]),
+        .sound(dac_sound)
     );
 
     wire [7:0] ppi_data;

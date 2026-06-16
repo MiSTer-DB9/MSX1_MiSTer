@@ -41,6 +41,7 @@ module msx_slots (
     ext_sd_card_if.device_mp    ext_SD_card_bus,
     flash_bus_if.device_mp      flash_bus,
     memory_bus_if.device_mp     memory_bus,
+    block_info                  block_info,   
     input MSX::slot_expander_t  slot_expander[4],
     input MSX::block_t          slot_layout[64],
     input MSX::lookup_RAM_t     lookup_RAM[16],
@@ -55,7 +56,6 @@ module msx_slots (
     input                 [1:0] ocm_slot2_mode
 );
 
-    block_info block_info();
     memory_bus_if memory_bus_mappers();
 
     wire [1:0] active_subslot;

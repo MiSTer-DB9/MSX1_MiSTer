@@ -135,6 +135,22 @@
       <device mask="0xFF" port="0x77">LATCH_PORT</device>
     </block>
   </fw>
+    <fw name="SuperSwangi">
+    <block>
+      <mapper>SUPERSWANGI</mapper>
+    </block>
+  </fw>
+  <fw name="Synthesizer">
+    <block start="1" count="2" offset="0">
+      <mapper>OFFSET</mapper>
+      <device>DAC</device>
+    </block>
+  </fw>
+  <fw name="MSXWrite">
+    <block>
+      <mapper>MSXWRITE</mapper>
+    </block>
+  </fw>
   <fw name="FM_PAC">
     <block>
       <filename>FM_PAC_EN.ROM</filename>

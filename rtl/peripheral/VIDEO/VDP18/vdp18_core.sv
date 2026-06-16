@@ -127,6 +127,7 @@ module vdp18_core #(
 
   logic stop_sprite_s;
   logic vert_active_s, hor_active_s;
+  logic window_v_s, window_h_s;
 
   logic rd_s, wr_s;
 
@@ -206,7 +207,9 @@ module vdp18_core #(
     .access_type_o (access_type_s),
     .vert_active_o (vert_active_s),
     .hor_active_o  (hor_active_s),
-    .irq_o         (irq_s)
+    .irq_o         (irq_s),
+    .window_v_o    (window_v_s),
+    .window_h_o    (window_h_s)
   );
 
   // CPU I/O Module
@@ -324,6 +327,8 @@ module vdp18_core #(
     .blank_i       (blank_s),
     .hblank_i      (hblank_s),
     .vblank_i      (vblank_s),
+    .window_v_i    (window_v_s),
+    .window_h_i    (window_h_s),
     .reg_col0_i    (reg_col0_s),
     .pat_col_i     (pat_col_s),
     .spr0_col_i    (spr0_col_s),
