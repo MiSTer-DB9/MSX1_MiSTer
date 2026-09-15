@@ -240,6 +240,13 @@ clock_bus_if clock_bus(clk_core, clk_sdram);
 // [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: joydb wrapper instance
 // Placed after clock_bus is declared so .clk_sys can bind to the same
 // HPS-bus clock (clock_bus.base_mp.clk) that the hps_io instance uses.
+// [MiSTer-DB9 BEGIN] - DB9 remap factory default (used until Main_MiSTer streams UIO 0xFD)
+// Derived from CONF_STR J1, same rule as db9_map.cpp; lets the core work on a stock MiSTer binary.
+// DB15:  no J1 button list, generic table (db9_map_hardcoded_default)
+// DB9MD: no J1 button list, generic table (db9_map_hardcoded_default)
+wire  [35:0] db9_remap_default_db15  = 36'hFAB987654;
+wire  [35:0] db9_remap_default_db9md = 36'hFAB987654;
+// [MiSTer-DB9 END]
 joydb joydb (
   .clk                 ( CLK_JOY               ),
   .clk_sys             ( clock_bus.base_mp.clk ),
@@ -260,6 +267,8 @@ joydb joydb (
   .remap_cmd           ( db9_remap_cmd         ),
   .remap_byte_cnt      ( db9_remap_byte_cnt    ),
   .remap_din           ( db9_remap_din         ),
+  .remap_default_db15  ( db9_remap_default_db15  ),
+  .remap_default_db9md ( db9_remap_default_db9md ),
   .joydb_1_mapped      ( joydb_1_mapped        ),
   .joydb_2_mapped      ( joydb_2_mapped        ),
   .joy_raw             ( joy_raw_payload       )
