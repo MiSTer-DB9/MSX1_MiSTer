@@ -1,41 +1,22 @@
 // WD279x FDC
 //
-// Copyright (c) 2024-2025 Molekula
+// Copyright (c) 2024-2026 Molekula
 //
-// All rights reserved
+// This program is free software: you can redistribute it and/or modify it under the terms of
+// the GNU General Public License as published by the Free Software Foundation, either version 3
+// of the License, or (at your option) any later version.
 //
-// Redistribution and use in source and synthezised forms, with or without
-// modification, are permitted provided that the following conditions are met:
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+// without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU General Public License for more details.
 //
-// * Redistributions of source code must retain the above copyright notice,
-//   this list of conditions and the following disclaimer.
+// You should have received a copy of the GNU General Public License along with this program.
+// If not, see <https://www.gnu.org/licenses/>.
 //
-// * Redistributions in synthesized form must reproduce the above copyright
-//   notice, this list of conditions and the following disclaimer in the
-//   documentation and/or other materials provided with the distribution.
-//
-// * Neither the name of the author nor the names of other contributors may
-//   be used to endorse or promote products derived from this software without
-//   specific prior written agreement from the author.
-//
-// * License is granted for non-commercial use only.  A fee may not be charged
-//   for redistributions as source code or in synthesized/hardware form without
-//   specific prior written agreement from the author.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE
-// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-// POSSIBILITY OF SUCH DAMAGE.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-module wd279x #(parameter WD279_57=1, parameter sysCLK) 
+module wd279x #(parameter WD279_57=1, parameter sysCLK)
 (
 	input  logic        clk,         // sys clock
 	input  logic        MRn,	      // master reset
@@ -57,7 +38,9 @@ module wd279x #(parameter WD279_57=1, parameter sysCLK)
 	output logic        HLD,
 	output logic        SSO,
 	input  logic        RAWRDn,
-	input  logic        DDENn
+	input  logic        DDENn,
+	output logic        WG,          // write gate
+	output logic        WD           // write data (1 clk pulse per flux transition)
 );
 
 	localparam A_COMMAND         = 0;
@@ -72,9 +55,19 @@ module wd279x #(parameter WD279_57=1, parameter sysCLK)
 	logic       INTRQ_ACK;
 
 	assign busy = command_start | status[0];
-	assign INTRQ = INTRQ_I | INTRQ_II || INTRQ_IV;
-	assign status = status_command_type_I | status_command_type_II | status_command_type_IV;
-	assign HLD = HLD_I | HLD_II ;
+	assign INTRQ = INTRQ_I | INTRQ_II | INTRQ_III | INTRQ_IV;
+	assign status = status_command_type_I | status_command_type_II | status_command_type_III | status_command_type_IV;
+	assign HLD = HLD_I | HLD_II | HLD_III;
+
+	// WD2795/7: bit 1 of the type II and III commands is U, the side select output SSO (the 2793
+	// compares the side instead and has no SSO), bit 3 is L, the sector length flag: L = 0 makes
+	// N 0..3 = 256, 512, 1024, 128 bytes instead of 128 << N
+	wire type_II_III = reg_cmd[7:6] == 2'b10 || (reg_cmd[7:6] == 2'b11 && reg_cmd[5:4] != 2'b01);
+	always_ff @(posedge clk) begin
+		if (~MRn)                                               SSO <= 1'b0;
+		else if (WD279_57 != 0 && command_start && type_II_III) SSO <= reg_cmd[1];
+	end
+	wire [1:0] len_add = (WD279_57 != 0 && !reg_cmd[3]) ? 2'd1 : 2'd0;
 	always_comb begin
 		DOUT = '1;
 		INTRQ_ACK = 0;
@@ -95,8 +88,8 @@ module wd279x #(parameter WD279_57=1, parameter sysCLK)
 
 	assign write_rq = ~CSn && last_WEn && ~WEn;
 	assign read_rq  = ~CSn && last_REn && ~REn;
-	
-	
+
+
 	//Command register
 	always_ff @(posedge clk) begin
 		command_start <= 0;
@@ -123,7 +116,7 @@ module wd279x #(parameter WD279_57=1, parameter sysCLK)
 				reg_track <= DIN;
 				//$display("SET TRACK %X", DIN);
 			end
-			if (reg_track_write) 
+			if (reg_track_write)
 				reg_track <= reg_track_out;
 		end
 	end
@@ -137,38 +130,41 @@ module wd279x #(parameter WD279_57=1, parameter sysCLK)
 				reg_sector <= DIN;
 				//$display("SET SECTOR %X", DIN);
 			end
-			if (reg_sector_write) 
+			if (reg_sector_write)
 				reg_sector <= reg_sector_out;
+			if (sector_write_III)
+				reg_sector <= sector_out_III;		// Read Address: the track byte of the ID
 		end
 	end
 
-	//Data register Používá třeba seek
-	//logic reg_lost_data;		//TODO: Implement lost data
+	// Data register and DRQ: any CPU access of the data register clears DRQ, so does a new
+	// command (openMSX; a command ended by Lost Data or Force Interrupt leaves it set); a read
+	// command sets it with every byte from the disk, a write command when it can take the next byte
 	always_ff @(posedge clk) begin
 		if (~MRn)	begin
 			reg_data <= 0;
-	//		reg_lost_data <= 0;
+			DRQ <= 0;
 		end	else begin
 			if (write_rq && A == A_DATA) begin
-				//$display("SET DATA  %X", DIN);
 				reg_data <= DIN;
+				DRQ <= 0;
 			end
-			
+			if (read_rq && A == A_DATA) DRQ <= 0;
+			if (command_start) DRQ <= 0;
+
 			if (reg_data_write_I) begin
 				reg_data <= reg_data_out_I;
 			end
 
 			if (enable_write_reg_data_II && fdd_rx) begin
-	//			if (DRQ) begin
-	//				reg_lost_data <= 1;
-	//			end
 				reg_data <= fdd_data;
 				DRQ <= 1;
 			end
-			
-			if (read_rq && A == A_DATA) begin
-				DRQ <= 0;
+			if (data_write_III) begin
+				reg_data <= data_out_III;
+				DRQ <= 1;
 			end
+			if (drq_set_II || drq_set_III) DRQ <= 1;
 		end
 	end
 
@@ -211,7 +207,10 @@ logic       reg_sector_write;
 logic [7:0] status_command_type_II;
 logic       INTRQ_II;
 logic       enable_write_reg_data_II;
+logic       drq_set_II;
 logic       HLD_II;
+logic       wg_II, tx_wr_II, tx_a1_II, tx_mark_II, tx_crc_II;
+logic [7:0] tx_data_II;
 wd279x_command_II #(.WD279_57(WD279_57)) command_II (
 	.clk(clk),
 	.msclk(msclk),
@@ -227,18 +226,73 @@ wd279x_command_II #(.WD279_57(WD279_57)) command_II (
 	.INDEXn(INDEXn),
 	.READYn(READYn),
 	.WPROTn(WPROTn),
-	.SSO(SSO),
+	.DDENn(DDENn),
+	.len_add(len_add),
 	.HLD(HLD_II),
 	.INTRQ(INTRQ_II),
 	.INTRQ_ACK(INTRQ_ACK),
 	.DRQ(DRQ),
+	.drq_set(drq_set_II),
 	.enable_write_reg_data(enable_write_reg_data_II),
 	.IDAM_valid(IDAM_valid),
 	.IDAM_data(IDAM_data),
 	.DAM_valid(DAM_valid),
 	.DAM_deleted(DAM_deleted),
 	.DAM_CRC_valid(DAM_CRC_valid),
-	.data_rx(fdd_rx)
+	.data_rx(fdd_rx),
+	.reg_data(reg_data),
+	.tx_req(tx_req),
+	.tx_idle(tx_idle),
+	.byte_tick(byte_tick),
+	.wg(wg_II),
+	.tx_wr(tx_wr_II),
+	.tx_a1(tx_a1_II),
+	.tx_mark(tx_mark_II),
+	.tx_crc(tx_crc_II),
+	.tx_data(tx_data_II)
+);
+
+logic [7:0] status_command_type_III;
+logic       INTRQ_III, HLD_III, drq_set_III, data_write_III, sector_write_III;
+logic [7:0] data_out_III, sector_out_III;
+logic       wg_III, tx_wr_III, tx_a1_III, tx_c2_III, tx_mark_III, tx_crc_III;
+logic [7:0] tx_data_III;
+wd279x_command_III command_III (
+	.clk(clk),
+	.msclk(msclk),
+	.interrupt(interrupt),
+	.MRn(MRn),
+	.command_start(command_start),
+	.command(reg_cmd),
+	.status(status_command_type_III),
+	.INTRQ(INTRQ_III),
+	.INTRQ_ACK(INTRQ_ACK),
+	.DRQ(DRQ),
+	.drq_set(drq_set_III),
+	.data_out(data_out_III),
+	.data_write(data_write_III),
+	.sector_out(sector_out_III),
+	.sector_write(sector_write_III),
+	.INDEXn(INDEXn),
+	.READYn(READYn),
+	.WPROTn(WPROTn),
+	.DDENn(DDENn),
+	.HLD(HLD_III),
+	.IDAM_data(IDAM_data),
+	.IDAM_done(IDAM_done),
+	.IDAM_crc_ok(IDAM_crc_ok),
+	.fdd_data(fdd_data),
+	.fdd_rx(fdd_rx),
+	.reg_data(reg_data),
+	.tx_req(tx_req),
+	.wg(wg_III),
+	.tx_wr(tx_wr_III),
+	.tx_a1(tx_a1_III),
+	.tx_c2(tx_c2_III),
+	.tx_mark(tx_mark_III),
+	.tx_crc(tx_crc_III),
+	.tx_data(tx_data_III),
+	.byte_tick(byte_tick)
 );
 
 logic       INTRQ_IV;
@@ -260,28 +314,53 @@ wd279x_command_IV  command_IV (
 	.HLD(HLD)
 );
 
-	
+
 logic  [7:0] IDAM_data[6];
 logic  [7:0] fdd_data;
 logic        fdd_rx;
 logic        IDAM_valid;
+logic        IDAM_done;
+logic        IDAM_crc_ok;
 logic        DAM_valid;
 logic        DAM_deleted;
 logic        DAM_CRC_valid;
 
-wd279x_demodulator #(.sysCLK(sysCLK)) modulator (
+wd279x_demodulator #(.sysCLK(sysCLK)) demodulator (
 	.clk(clk),
 	.MRn(MRn),
 	.INDEXn(INDEXn),
 	.DDENn(DDENn),
 	.RAWRDn(RAWRDn),
+	.len_add(len_add),
 	.IDAM_data(IDAM_data),
     .fdd_data(fdd_data),
     .fdd_rx(fdd_rx),
     .IDAM_valid(IDAM_valid),
+    .IDAM_done(IDAM_done),
+    .IDAM_crc_ok(IDAM_crc_ok),
 	.DAM_valid(DAM_valid),
 	.DAM_deleted(DAM_deleted),
     .DAM_CRC_valid(DAM_CRC_valid)
+);
+
+// One command writes at a time: type II (Write Sector) or type III (Write Track)
+logic tx_req, tx_idle, byte_tick;
+wd279x_modulator #(.sysCLK(sysCLK)) modulator (
+	.clk(clk),
+	.MRn(MRn),
+	.DDENn(DDENn),
+	.wg(wg_II | wg_III),
+	.tx_wr(tx_wr_II | tx_wr_III),
+	.tx_a1(tx_a1_II | tx_a1_III),
+	.tx_c2(tx_c2_III),
+	.tx_mark(tx_mark_II | tx_mark_III),
+	.tx_crc(tx_crc_II | tx_crc_III),
+	.tx_data(wg_III ? tx_data_III : tx_data_II),
+	.tx_req(tx_req),
+	.tx_idle(tx_idle),
+	.byte_tick(byte_tick),
+	.WG(WG),
+	.WD(WD)
 );
 
 logic msclk;

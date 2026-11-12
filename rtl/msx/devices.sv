@@ -2,58 +2,43 @@
 //
 // Copyright (c) 2024-2025 Molekula
 //
-// All rights reserved
+// This program is free software: you can redistribute it and/or modify it under the terms of
+// the GNU General Public License as published by the Free Software Foundation, either version 3
+// of the License, or (at your option) any later version.
 //
-// Redistribution and use in source and synthezised forms, with or without
-// modification, are permitted provided that the following conditions are met:
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+// without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU General Public License for more details.
 //
-// * Redistributions of source code must retain the above copyright notice,
-//   this list of conditions and the following disclaimer.
+// You should have received a copy of the GNU General Public License along with this program.
+// If not, see <https://www.gnu.org/licenses/>.
 //
-// * Redistributions in synthesized form must reproduce the above copyright
-//   notice, this list of conditions and the following disclaimer in the
-//   documentation and/or other materials provided with the distribution.
-//
-// * Neither the name of the author nor the names of other contributors may
-//   be used to endorse or promote products derived from this software without
-//   specific prior written agreement from the author.
-//
-// * License is granted for non-commercial use only.  A fee may not be charged
-//   for redistributions as source code or in synthesized/hardware form without
-//   specific prior written agreement from the author.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE
-// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-// POSSIBILITY OF SUCH DAMAGE.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 module devices  #(parameter sysCLK)
 (
     clock_bus_if.base_mp    clock_bus,                              // Clock interface
+    input                   hard_reset,                             // cold reset (cpu_bus.reset is any reset)
     cpu_bus_if.device_mp    cpu_bus,                                // CPU bus interface
-    device_bus              device_bus,                             // Device control bus interface
-    FDD_if.FDC_mp           FDD_bus[3],
-    video_bus_if.device_mp  video_bus,
+    input  MSX::device_bus_t device_bus,                             // Device control bus interface
+    FDD_if.FDC_mp           FDD_bus[MSX::N_FDC],
+    output MSX::video_t     video_bus,
     vram_bus_if.device_mp   vram_bus,
     memory_bus_if.device_mp memory_bus,
+    wave_bus_if.device_mp   wave_bus,                               // OPL4 sample memory
+    input  MSX::block_info_t block_info,
     input MSX::io_device_t  io_device[32][3],                       // Array of IO devices
     input MSX::io_device_mem_ref_t io_memory[8],                    // Array of memory references
     input MSX::kb_memory_t  kb_upload_memory,
     input MSX::user_config_t msx_user_config,
     input            [10:0] ps2_key,
+    input            [24:0] ps2_mouse,
     input            [64:0] rtc_time,
     input             [7:0] uart_rx_data,
     input                   uart_rx,
-    output    signed [15:0] sound_L,                                // Combined audio output
-    output    signed [15:0] sound_R,                                // Combined audio output
+    output    signed [15:0] sound_L,                                // Mixed and clipped audio (sound_mix)
+    output    signed [15:0] sound_R,
     output            [7:0] data,                                   // Combined data output
     output                  data_oe_rq,                             // Priorite data
     output            [7:0] data_to_mapper,                         // Data output to mapper
@@ -65,51 +50,48 @@ module devices  #(parameter sysCLK)
     output                  keybeep,
     output                  reset_lock,
     output                  reset_request,
-    //output                  cpu_wait,
-    //output            [1:0] cpu_clock_sel,
+    output MSX::cpu_speed_t cpu_speed,              // OCM turbo, '0 without OCM
+    output                  opll_wait,              // CPU wait: OPLL busy (turbo)
+    output                  opl4_wait,              // CPU wait: OPL4 wave part busy
+    output                  turbor_r800,            // S1990: R800 selected
+    output                  turbor_dram,            // S1990: DRAM mode (ROM read from the main RAM)
+    output                  turbor_pause,           // hardware pause: hold the CPU
+    output                  turbor_pause_led,
+    output                  turbor_turbo_led,
+    input                   ocm_mmc_on,
     output                  ocm_megaSD_enable,
     output                  ocm_slot1_mode,
-    output [1:0]            ocm_slot2_mode
+    output [1:0]            ocm_slot2_mode,
+    output                  ocm_ipl_en              // OCM IPL ROM visible (before BIOS load)
 );
 
-    video_bus_if            video_bus_tms();
+    MSX::video_t            video_bus_tms, video_bus_v99;
     vram_bus_if             vram_bus_tms();
-    video_bus_if            video_bus_v99();
     vram_bus_if             vram_bus_v99();
 
     // Výstupy kombinující jednotlivé zařízení
-    assign sound_L = opll_sound + scc_sound + psg_sound + opm_sound_L;
-    assign sound_R = opll_sound + scc_sound + psg_sound + opm_sound_R;
-    assign data = scc_data & fdc_data & msx2_ram_data & tms_data & v99_data & rtc_data & psg_data & ppi_data & ocm_data & reset_status_data & opm_data & ym2148_data;// & TC8566AF_data;
+    assign data = scc_data & fdc_data & msx2_ram_data & tms_data & v99_data & rtc_data & psg_data & ppi_data & ocm_data & reset_status_data & opm_data & ym2148_data & systimer_data & s1990_data & turbor_pcm_data & turbor_pause_data & opl4_data;
     assign data_oe_rq = fdc_data_oe_rq;// | TC8566AF_data_oe_rq;
     assign data_to_mapper = msx2_ram_data_to_mapper & latch_port_data_to_mapper;
 
     assign reset_request = ocm_reset_request;
     assign reset_lock    = ocm_reset_lock;
 
-    assign memory_bus.addr    = kanji_ram_addr & ocm_ram_addr;
-    assign memory_bus.ram_cs  = kanji_ram_cs | ocm_ram_cs;
+    assign memory_bus.addr    = kanji_ram_addr;
+    assign memory_bus.ram_cs  = kanji_ram_cs;
     assign memory_bus.sram_cs = '0;
     assign memory_bus.data    = '1;
     assign memory_bus.rnw     = '1;
 
     // VIDEO interfaces
-    assign cpu_interrupt     = tms_interrupt | v99_interrupt | opm_irq | ym2148_irq;
+    assign cpu_interrupt     = tms_interrupt | v99_interrupt | opm_irq | ym2148_irq | opl4_irq;
 
-    assign video_bus.R       = video_bus_tms.R              | video_bus_v99.R;          // default black
-    assign video_bus.G       = video_bus_tms.G              | video_bus_v99.G;          // default black
-    assign video_bus.B       = video_bus_tms.B              | video_bus_v99.B;          // default black
-    assign video_bus.DE      = video_bus_tms.DE             | video_bus_v99.DE;
-    assign video_bus.HS      = video_bus_tms.HS             | video_bus_v99.HS;
-    assign video_bus.VS      = video_bus_tms.VS             | video_bus_v99.VS;
-    assign video_bus.hblank  = video_bus_tms.hblank         | video_bus_v99.hblank;
-    assign video_bus.vblank  = video_bus_tms.vblank         | video_bus_v99.vblank;
-    assign video_bus.ce_pix  = video_bus_tms.ce_pix         | video_bus_v99.ce_pix;
+    assign video_bus         = video_bus_tms | video_bus_v99;     // only the enabled VDP drives
 
-    assign vram_bus.addr     = vram_bus_tms.device_mp.addr  & vram_bus_v99.device_mp.addr;
-    assign vram_bus.data     = vram_bus_tms.device_mp.data  & vram_bus_v99.device_mp.data;
-    assign vram_bus.we_lo    = vram_bus_tms.device_mp.we_lo | vram_bus_v99.device_mp.we_lo;
-    assign vram_bus.we_hi    = vram_bus_tms.device_mp.we_hi | vram_bus_v99.device_mp.we_hi;
+    assign vram_bus.addr     = vram_bus_tms.addr  & vram_bus_v99.addr;
+    assign vram_bus.data     = vram_bus_tms.data  & vram_bus_v99.data;
+    assign vram_bus.we_lo    = vram_bus_tms.we_lo | vram_bus_v99.we_lo;
+    assign vram_bus.we_hi    = vram_bus_tms.we_hi | vram_bus_v99.we_hi;
 
     assign vram_bus_tms.q_lo = vram_bus.q_lo;
     assign vram_bus_tms.q_hi = vram_bus.q_hi;
@@ -119,16 +101,18 @@ module devices  #(parameter sysCLK)
     //MSX2 memory limiter
 
     // Definice instancí zařízení s výstupy pro propojení
-    wire signed [15:0] opll_sound;
+    MSX::sound_t opll_sound;
     dev_opll opll (
         .cpu_bus(cpu_bus),
         .device_bus(device_bus),
         .clock_bus(clock_bus),
         .io_device(io_device[DEV_OPLL]),
+        .enawait(cpu_speed.en && cpu_speed.clock_sel != 2'b00),
+        .wait_rq(opll_wait),
         .sound(opll_sound)
     );
 
-    wire signed [15:0] opm_sound_L, opm_sound_R;
+    MSX::sound_t opm_sound_L, opm_sound_R;
     wire         [7:0] opm_data;
     wire               opm_irq;
     dev_opm opm (
@@ -140,6 +124,21 @@ module devices  #(parameter sysCLK)
         .data(opm_data),
         .sound_L(opm_sound_L),
         .sound_R(opm_sound_R)
+    );
+
+    MSX::sound_t opl4_sound_L, opl4_sound_R;
+    wire         [7:0] opl4_data;
+    wire               opl4_irq;
+    dev_opl4 opl4 (
+        .cpu_bus(cpu_bus),
+        .io_device(io_device[DEV_OPL4]),
+        .io_memory(io_memory),
+        .wave_bus(wave_bus),
+        .sound_L(opl4_sound_L),
+        .sound_R(opl4_sound_R),
+        .data(opl4_data),
+        .irq(opl4_irq),
+        .wait_rq(opl4_wait)
     );
 
     wire         [7:0] ym2148_data;
@@ -156,7 +155,7 @@ module devices  #(parameter sysCLK)
     );
 
     wire [7:0] scc_data;
-    wire signed [15:0] scc_sound;
+    MSX::sound_t scc_sound;
     dev_scc scc (
         .cpu_bus(cpu_bus),
         .clock_bus(clock_bus),
@@ -190,6 +189,7 @@ module devices  #(parameter sysCLK)
     dev_FDC #(.sysCLK(sysCLK)) FDC (
         .cpu_bus(cpu_bus),
         .device_bus(device_bus),
+        .block_info(block_info),
         .io_device(io_device),
         .FDD_bus(FDD_bus),
         .data(fdc_data),
@@ -198,18 +198,17 @@ module devices  #(parameter sysCLK)
 
     wire [26:0] kanji_ram_addr;
     wire        kanji_ram_cs;
+    wire        ocm_jis2_en;
     dev_kanji kanji (
         .cpu_bus(cpu_bus),
         .io_device(io_device[DEV_KANJI]),
         .io_memory(io_memory),
+        .jis2_en(ocm_jis2_en),
         .ram_cs(kanji_ram_cs),
         .ram_addr(kanji_ram_addr)
     );
 
-    wire [26:0] ocm_ram_addr;
     wire  [7:0] ocm_data;
-    wire        ocm_ram_cs;
-    wire        ocm_data_oe_rq;
     wire        ocm_mapper_limit;
     wire        ocm_reset_request;
     wire        ocm_reset_lock;
@@ -217,20 +216,19 @@ module devices  #(parameter sysCLK)
         .cpu_bus(cpu_bus),
         .clock_bus(clock_bus),
         .io_device(io_device[DEV_OCM_BOOT]),
-        .io_memory(io_memory),
-        .ram_cs(ocm_ram_cs),
-        .ram_addr(ocm_ram_addr),
-        .data(ocm_data),
-
         .ff_dip_req(msx_user_config.ocm_dip),
+        .ps2_key(ps2_key),
+        .mmc_on(ocm_mmc_on),
+        .cpu_speed(cpu_speed),
+        .data(ocm_data),
+        .ipl_en(ocm_ipl_en),
+        .jis2_en(ocm_jis2_en),
         .mapper_limit(ocm_mapper_limit),
-        .rst_key_lock(ocm_reset_lock),
-        .swio_reset(ocm_reset_request),
         .megaSD_enable(ocm_megaSD_enable),
-
-
         .Slot1Mode(ocm_slot1_mode),
-        .Slot2Mode(ocm_slot2_mode)
+        .Slot2Mode(ocm_slot2_mode),
+        .rst_key_lock(ocm_reset_lock),
+        .swio_reset(ocm_reset_request)
     );
 
     wire  [7:0] tms_data;
@@ -270,7 +268,7 @@ module devices  #(parameter sysCLK)
     );
 
     wire [7:0] psg_data;
-    wire signed [15:0] psg_sound;
+    MSX::sound_t psg_sound;
     dev_psg dev_psg
     (
         .cpu_bus(cpu_bus),
@@ -278,8 +276,77 @@ module devices  #(parameter sysCLK)
         .io_device(io_device[DEV_PSG]),
         .sound(psg_sound),
         .data(psg_data),
-        .joy(joy),
+        .joy(joy_sw),
+        .ps2_mouse(ps2_mouse),
+        .mouse_en(ocm_present),
+        .mouse_port(msx_user_config.mouse_port),
         .tape_in(tape_in)
+    );
+
+    // OCM: joystick swap and PS/2 mouse (OSD options shown only for OCM)
+    wire       ocm_present = io_device[DEV_OCM_BOOT][0].enable;
+    wire       joy_swap    = ocm_present && msx_user_config.joy_swap;
+    wire [5:0] joy_sw[2];
+    assign joy_sw[0] = joy_swap ? joy[1] : joy[0];
+    assign joy_sw[1] = joy_swap ? joy[0] : joy[1];
+
+    MSX::sound_t dac_sound;
+    dev_dac dev_dac
+    (
+        .cpu_bus(cpu_bus),
+        .clock_bus(clock_bus),
+        .block_info(block_info),
+        .io_device(io_device[DEV_DAC]),
+        .sound(dac_sound)
+    );
+
+    // Turbo R: S1990 (E4h / E5h), PCM (A4h / A5h), pause (A7h); the firmware switch is an OSD
+    // option, the pause key the PS/2 Pause key (doc/turboR.md)
+    wire [7:0] s1990_data, turbor_pcm_data, turbor_pause_data;
+    wire       turbor_mute;
+    MSX::sound_t turbor_pcm_sound;
+    dev_s1990 dev_s1990 (
+        .cpu_bus(cpu_bus),
+        .io_device(io_device[DEV_S1990]),
+        .firmware_sw(msx_user_config.turbor_firmware),
+        .data(s1990_data),
+        .r800(turbor_r800),
+        .dram(turbor_dram)
+    );
+    dev_turbor_pcm dev_turbor_pcm (
+        .cpu_bus(cpu_bus),
+        .io_device(io_device[DEV_TURBOR_PCM]),
+        .data(turbor_pcm_data),
+        .sound(turbor_pcm_sound),
+        .mute_all(turbor_mute)
+    );
+    dev_turbor_pause dev_turbor_pause (
+        .cpu_bus(cpu_bus),
+        .io_device(io_device[DEV_TURBOR_PAUSE]),
+        .ps2_key(ps2_key),
+        .data(turbor_pause_data),
+        .hw_pause(turbor_pause),
+        .pause_led(turbor_pause_led),
+        .turbo_led(turbor_turbo_led)
+    );
+
+    // Single clipping point for all sound sources
+    sound_mix sound_mix (
+        .clk(cpu_bus.clk),
+        .opll(opll_sound),
+        .scc(scc_sound),
+        .psg(psg_sound),
+        .dac(dac_sound),
+        .pcm(turbor_pcm_sound),
+        .mute(turbor_mute),
+        .opm_L(opm_sound_L),
+        .opm_R(opm_sound_R),
+        .opl4_L(opl4_sound_L),
+        .opl4_R(opl4_sound_R),
+        .keybeep(keybeep),
+        .tape(tape_in & ~tape_motor_on),
+        .sound_L(sound_L),
+        .sound_R(sound_R)
     );
 
     wire [7:0] ppi_data;
@@ -299,7 +366,15 @@ module devices  #(parameter sysCLK)
     dev_reset_status dev_reset_status (
         .cpu_bus(cpu_bus),
         .io_device(io_device[DEV_RESET_STATUS]),
+        .hard_reset(hard_reset),
         .data(reset_status_data)
+    );
+
+    wire [7:0] systimer_data;
+    dev_systimer dev_systimer (
+        .cpu_bus(cpu_bus),
+        .io_device(io_device[DEV_SYSTIMER]),
+        .data(systimer_data)
     );
 
 endmodule

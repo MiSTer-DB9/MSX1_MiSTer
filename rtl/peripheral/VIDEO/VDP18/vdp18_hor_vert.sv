@@ -85,7 +85,8 @@ module vdp18_hor_vert (
     assign last_pix_s = (opmode_i == OPMODE_TEXTM) ? hv_last_pix_text_c : hv_last_pix_graph_c;
 
     // Process counters
-    always_ff @(posedge clk_i or posedge reset_i) begin
+    // Sync reset: async reset with is_pal_i dependent first_line_s became latches
+    always_ff @(posedge clk_i) begin
         if (reset_i) begin
             cnt_hor_q <= hv_first_pix_text_c;
             cnt_vert_q <= first_line_s;
@@ -129,7 +130,7 @@ module vdp18_hor_vert (
             end
             if (cnt_vert_q == last_line_s - 9'sd6) begin
                 vblank_q <= 1'b1;
-            end else if (cnt_vert_q == first_line_s + 9'sd14) begin
+            end else if (cnt_vert_q == first_line_s + 9'sd13) begin   // 13 lines top blanking (TI)
                 vblank_q <= 1'b0;
             end
         end

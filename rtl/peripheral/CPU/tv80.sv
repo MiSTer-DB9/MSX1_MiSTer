@@ -66,6 +66,9 @@
 //  +k05 : Fixed a bug in which the flag register was not changing in "LD A,I" and "LD A,R" by t.hara 2022.11.05
 //
 //  +m01 : Revrite to systemVerilog by Molekula 2025.01.26, original: https://github.com/gnogni/ocm-pld-dev.git 95aa5e2179f28c0d8028e17203909804ce6ff66b
+//  +m02 : Savestate ports REG / DIRSet / DIR as T80.vhd of the MiSTer T80 (T80(c) version 350,
+//         Sorgelig); DIRSet also clears Alternate, the pending write-back and the INT/NMI/HALT
+//         state, so the core can resume fetching at the loaded PC (Z80 / R800 switch, turbo R)
 
 module TV80#( parameter Mode      = 0,
                         R800_MULU = 1,
@@ -103,7 +106,11 @@ module TV80#( parameter Mode      = 0,
     output              IntCycle_n,
     input               R800_mode,
     output              IntE,
-    output              Stop
+    output              Stop,
+    // Savestate (MiSTer T80 layout): IFF2, IFF1, IM, IY, HL', DE', BC', IX, HL, DE, BC, PC, SP, R, I, F', A', F, A
+    output      [211:0] REG,
+    input               DIRSet,         // load DIR (has priority over CEN, works with CEN = 0)
+    input       [211:0] DIR
 );
 
     localparam          aNone = 3'b111;
@@ -143,6 +150,7 @@ module TV80#( parameter Mode      = 0,
     logic        [31:0] MULU_Prod32;
     logic        [31:0] MULU_tmp;
     logic        [15:0] MULU_Fakt1;
+    logic               MULU_W;                                                                    // 1: MULUW, 0: MULUB
 
     logic signed [15:0] ID16;
     logic         [7:0] Save_Mux;
@@ -169,7 +177,8 @@ module TV80#( parameter Mode      = 0,
     logic               BTR_r;
     logic               Auto_Wait;
     logic               Auto_Wait_t1;
-    logic               Auto_Wait_t2;
+    logic         [1:0] IntWait;    // wait states left in the interrupt acknowledge
+    logic               Wait_i;     // /WAIT only counts in cycles that use the bus
     logic               IncDecZ;
 
     // ALU signals
@@ -346,6 +355,11 @@ module TV80#( parameter Mode      = 0,
                              Save_ALU_r ? ALU_Q  :
                                           DI_Reg ;
 
+    // Register file in logical order regardless of EXX (Alternate swaps pairs 0-2 with 4-6)
+    wire [127:0] DOR;
+    wire [127:0] DOR_logical = Alternate ? {DOR[127:112], DOR[47:0], DOR[63:48], DOR[111:64]} : DOR;
+    assign REG = {IntE_FF2, IntE_FF1, IStatus, DOR_logical, PC, SP, R, I, Fp, Ap, F, ACC};
+
     always_ff @(negedge RESET_n or posedge CLK_n) begin
         if (~RESET_n) begin
             PC            <= '0;
@@ -376,6 +390,22 @@ module TV80#( parameter Mode      = 0,
             Save_ALU_r    <= '0;
             PreserveC_r   <= '0;
             XY_Ind        <= '0;
+        end else if (DIRSet) begin
+            ACC           <= DIR[7:0];
+            F             <= DIR[15:8];
+            Ap            <= DIR[23:16];
+            Fp            <= DIR[31:24];
+            I             <= DIR[39:32];
+            R             <= DIR[47:40];
+            SP            <= DIR[63:48];
+            PC            <= DIR[79:64];
+            A             <= DIR[79:64];
+            IStatus       <= DIR[209:208];
+            Alternate     <= '0;                // DIR is in logical order
+            // drop a write-back still pending from the previous instruction (none after OUT)
+            Read_To_Reg_r <= '0;
+            Save_ALU_r    <= '0;
+            ALU_Op_r      <= '0;
         end else begin
             if (ClkEn) begin
                 ALU_Op_r      <= '0;
@@ -392,7 +422,7 @@ module TV80#( parameter Mode      = 0,
                 Z16_r <= ISet == 2'b10 && ~ALU_Op[2] && ALU_Op[0] && MCycle == 3'd3;
 
                 if (MCycle == 3'd1 && ~TState[2]) begin
-                    if (TState == 3'd2 && WAIT_n) begin
+                    if (TState == 3'd2 && Wait_i) begin
                         if (Mode < 2) begin
                             A      <= {I, R};
                             R[6:0] <= R[6:0] + 7'b1;
@@ -497,7 +527,7 @@ module TV80#( parameter Mode      = 0,
                         end
                     end
 
-                    if (TState == 3'd2 && WAIT_n) begin
+                    if (TState == 3'd2 && Wait_i) begin
                         if (ISet == 2'b01 && MCycle == 3'd7)
                             IR <= DInst;
                         if (JumpE)
@@ -515,7 +545,7 @@ module TV80#( parameter Mode      = 0,
                     if (TState == 3'd3 && MCycle == 3'd6)
                         TmpAddr <= $unsigned($signed(RegBusC) + $signed({{8{DI_Reg[7]}}, DI_Reg}));
 
-                    if ((TState == 3'd2 && WAIT_n) || (TState == 3'd4 && MCycle == 3'd1))
+                    if ((TState == 3'd2 && Wait_i) || (TState == 3'd4 && MCycle == 3'd1))
                         if (IncDec_16[2:0] == 3'b111)
                             SP <= IncDec_16[3] ? SP - 16'b1 : SP + 16'b1;
 
@@ -583,6 +613,13 @@ module TV80#( parameter Mode      = 0,
                     F[Flag_P] <= ~(^DI_Reg);
                 end
 
+                if (T_Res && I_MULU) begin                                      // R800 MULUB / MULUW flags (openMSX)
+                    F[Flag_S] <= '0;
+                    F[Flag_P] <= '0;
+                    F[Flag_Z] <= MULU_W ? MULU_Prod32 == '0 : MULU_Prod32[31:16] == '0;
+                    F[Flag_C] <= MULU_W ? MULU_Prod32[31:16] != '0 : MULU_Prod32[31:24] != '0;
+                end
+
                 if (TState == 3'd1 && ~Auto_Wait_t1) begin
                     DO <= BusB;
                     if (I_RLD)
@@ -633,6 +670,7 @@ module TV80#( parameter Mode      = 0,
     always_ff @(posedge CLK_n) begin
         if (ClkEn) begin
             if (T_Res) begin
+                MULU_W <= ~I_MULUB;
                 if (I_MULUB) begin
                     MULU_Prod32[7:0]  <= ACC;
                     MULU_Prod32[15:8] <= 8'b0;
@@ -737,7 +775,7 @@ module TV80#( parameter Mode      = 0,
             RegWEL = '1;
         end
 
-        if (IncDec_16[2] && ((TState == 3'd2 && WAIT_n && MCycle != 3'd1) || (TState == 3'd3 && MCycle == 3'd1))) begin
+        if (IncDec_16[2] && ((TState == 3'd2 && Wait_i && MCycle != 3'd1) || (TState == 3'd3 && MCycle == 3'd1))) begin
             case (IncDec_16[1:0])
                 2'b00, 2'b01, 2'b10: begin
                     RegWEH = '1;
@@ -752,14 +790,13 @@ module TV80#( parameter Mode      = 0,
         RegDIH = Save_Mux;
         RegDIL = Save_Mux;
 
+        // MULUB: HL = product; MULUW: DE = high word (TState 4), HL = low word (as openMSX;
+        // the T80 of MSX_MiSTer / OCM-PLD writes them swapped)
         if (I_MULU) begin
-            if (T_Res) begin
-                RegDIH = MULU_Prod32[31:24];
-                RegDIL = MULU_Prod32[23:16];
-            end else begin
-                RegDIH = MULU_tmp[15:8];   // TState = 4 DE write
-                RegDIL = MULU_tmp[7:0];
-            end
+            if (T_Res)
+                {RegDIH, RegDIL} = MULU_W ? MULU_Prod32[15:0] : MULU_Prod32[31:16];
+            else
+                {RegDIH, RegDIL} = MULU_tmp[31:16];
         end
 
         if (ExchangeDH) begin
@@ -794,7 +831,10 @@ module TV80#( parameter Mode      = 0,
         .DOBH(RegBusB[15:8]),
         .DOBL(RegBusB[7:0]),
         .DOCH(RegBusC[15:8]),
-        .DOCL(RegBusC[7:0])
+        .DOCL(RegBusC[7:0]),
+        .DOR(DOR),
+        .DIRSet(DIRSet),
+        .DIR(DIR[207:80])                   // logical = physical order with Alternate = 0
     );
 
 // Buses
@@ -837,8 +877,8 @@ module TV80#( parameter Mode      = 0,
     always @(negedge RESET_n or posedge CLK_n) begin
         if (~RESET_n)
             RFSH_n <= '1;
-        else if (CLK_n && CEN) begin
-            if (MCycle == 3'b001 && ((TState == 3'd2 && WAIT_n) || TState == 3'd3))
+        else if (CEN) begin  // was CLK_n && CEN: clock must not be used as data
+            if (MCycle == 3'b001 && ((TState == 3'd2 && Wait_i) || TState == 3'd3))
                 RFSH_n <= '0;
             else
                 RFSH_n <= '1;
@@ -863,7 +903,7 @@ module TV80#( parameter Mode      = 0,
             INT_s <= '0;
             NMI_s <= '0;
             OldNMI_n <= '0;
-        end else if (CLK_n && CEN) begin
+        end else if (CEN) begin
             BusReq_s <= ~BUSRQ_n;
             INT_s <= ~INT_n;
 
@@ -891,15 +931,20 @@ module TV80#( parameter Mode      = 0,
             IntE_FF2 <= '0;
             No_BTR <= '0;
             Auto_Wait_t1 <= '0;
-            Auto_Wait_t2 <= '0;
             M1_n <= '1;
-        end else if (CLK_n && CEN) begin
+        end else if (DIRSet) begin
+            IntE_FF2 <= DIR[211];
+            IntE_FF1 <= DIR[210];
+            // the loaded context decides on INT / NMI at the end of its first instruction
+            IntCycle <= '0;
+            NMICycle <= '0;
+            Halt_FF  <= '0;
+        end else if (CEN) begin
             if (T_Res)
                 Auto_Wait_t1 <= '0;
             else
                 Auto_Wait_t1 <= Auto_Wait | IORQ_i;
 
-            Auto_Wait_t2 <= Auto_Wait_t1;
             No_BTR <= (I_BT  & (~IR[4] | ~F[Flag_P])) |
                       (I_BC  & (~IR[4] | F[Flag_Z] | ~F[Flag_P])) |
                       (I_BTR & (~IR[4] | F[Flag_Z]));
@@ -923,13 +968,15 @@ module TV80#( parameter Mode      = 0,
             if (IntCycle | NMICycle)
                 Halt_FF <= '0;
 
-            if (MCycle == 3'd1 && TState == 3'd2 && WAIT_n)
+            // Interrupt acknowledge: TV80a latches the vector on every CE_n of T2, so M1 stays
+            // low until the automatic wait states are over (else the last latch takes FF)
+            if (MCycle == 3'd1 && TState == 3'd2 && Wait_i && ~Auto_Wait)
                 M1_n <= '1;
 
             if (BusReq_s & BusAck) begin
             end else begin
                 BusAck <= '0;
-                if (TState == 3'd2 && ~WAIT_n) begin
+                if (TState == 3'd2 && ~Wait_i) begin
                 end else if (T_Res) begin
                     if (Halt)
                         Halt_FF <= '1;
@@ -960,7 +1007,7 @@ module TV80#( parameter Mode      = 0,
                         end else
                             MCycle <= MCycle + 3'd1;
                     end
-                end else if (~((Auto_Wait & ~Auto_Wait_t2) || (IOWait == 1 & IORQ_i & ~Auto_Wait_t1)))
+                end else if (~(Auto_Wait || (IOWait == 1 & IORQ_i & ~Auto_Wait_t1)))
                     TState <= TState + 3'd1;
             end
 
@@ -969,14 +1016,27 @@ module TV80#( parameter Mode      = 0,
         end
     end
 
-    always_comb begin
-        Auto_Wait = '0;
-        if (IntCycle || NMICycle) begin
-            if (MCycle == 3'd1) begin
-                Auto_Wait = '1;
-            end
+    // Z80 samples /WAIT only in bus cycles; internal ones (JR M3, DJNZ, ADD HL, ...) run on
+    assign Wait_i = WAIT_n | (NoRead & (MCycle != 3'd1));
+
+    // Interrupt acknowledge: two wait states in M1, 13 T for IM0/IM1, 19 T for IM2; none for
+    // NMI (11 T). Counted here: Auto_Wait_t1/t2 carried state from the previous cycle (also set
+    // by IORQ_i), so after IN/OUT there was one wait state instead of two.
+    always_ff @(negedge RESET_n or posedge CLK_n) begin
+        if (~RESET_n)
+            IntWait <= 2'd2;
+        else if (DIRSet)
+            IntWait <= 2'd2;
+        else if (CEN) begin
+            if (~(IntCycle && MCycle == 3'd1))
+                IntWait <= 2'd2;
+            else if (TState == 3'd2 && Wait_i && IntWait != 2'd0)
+                IntWait <= IntWait - 2'd1;
         end
     end
+
+    always_comb
+        Auto_Wait = IntCycle && MCycle == 3'd1 && TState == 3'd2 && IntWait != 2'd0;
 
 
 endmodule

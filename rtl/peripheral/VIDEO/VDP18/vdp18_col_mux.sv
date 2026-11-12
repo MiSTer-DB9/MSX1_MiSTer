@@ -57,6 +57,8 @@ module vdp18_col_mux #(
   input logic blank_i,
   input logic hblank_i,
   input logic vblank_i,
+  input logic window_v_i,
+  input logic window_h_i,
   output logic blank_n_o,
   output logic hblank_n_o,
   output logic vblank_n_o,
@@ -139,8 +141,8 @@ module vdp18_col_mux #(
       blank_n_o <= !blank_i;
 
       if (border_i == 1'b0) begin
-        hblank_n_o <= hor_active_i;
-        vblank_n_o <= vert_active_i;
+        hblank_n_o <= window_h_i;
+        vblank_n_o <= window_v_i;
       end else begin
         hblank_n_o <= !hblank_i;
         vblank_n_o <= !vblank_i;

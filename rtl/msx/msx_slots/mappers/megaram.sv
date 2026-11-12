@@ -39,9 +39,9 @@
 
 module mapper_megaram (
     cpu_bus_if.device_mp     cpu_bus,
-    mapper_out               out,
-    block_info               block_info,
-    device_bus               device_out,
+    output MSX::mapper_out_t out,
+    input  MSX::block_info_t block_info,
+    output MSX::device_bus_t device_out,
     input                    ocm_slot1_mode,
     input              [1:0] ocm_slot2_mode
 );
@@ -93,7 +93,7 @@ module mapper_megaram (
     end
 
 
-    always @(posedge cpu_bus.clk) begin
+    always_ff @(posedge cpu_bus.clk) begin
         if (cpu_bus.reset) begin
             // Reset bank registers and disable SCC
             SccBank0    <= '{8'h00, 8'h00};
@@ -191,14 +191,28 @@ module mapper_megaram (
         end
     end
 
+    // Stay inside the RAM block (1 or 2 MB); the OCM slot 1 ESE-SCC has 1 MB (emsx_top Scc1Adr)
+    wire [26:0] size_mask = {2'b00, block_info.rom_size} - 27'd1;
+    wire        ocm_slot1 = block_info.typ == MAPPER_MEGARAM && !block_info.id;
+    wire [26:0] blk_addr  = ram_addr & size_mask & (ocm_slot1 ? 27'h00FFFFF : {27{1'b1}});
+
     assign device_out.en    = cs && SccSel[1];
 
     wire oe;
 
     assign oe         = cs && SccSel == 2'b01 && (cpu_bus.rd || cpu_bus.wr);
 
-    assign out.addr   = oe ? ram_addr : {27{1'b1}};
+    assign out.addr   = oe ? blk_addr : {27{1'b1}};
     assign out.ram_cs = oe;
     assign out.rnw    = ~(cpu_bus.wr && oe);
+
+    // outputs not used by this mapper: neutral for the merge in mappers.sv
+    assign out.sram_cs = 1'b0;
+    assign out.main_cs = 1'b0;
+    assign out.data    = 8'hFF;
+    assign device_out.device_ref = 3'd0;
+    assign device_out.we         = 1'b0;
+    assign device_out.mode       = cs ? SccModeB[block_info.id][5] : 1'b1;  // SCC+ mode (BFFE bit 5)
+    assign device_out.param      = 1'b1;                                     // SCC-I chip
 
 endmodule

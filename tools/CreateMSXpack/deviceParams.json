@@ -10,11 +10,27 @@
         },
         "style": {
             "param_type": "enum",
-            "enums": ["Philips", "National"],
+            "enums": ["Philips", "National", "Sony"],
             "min": null,
             "max": null,
             "default": 0,
             "value_offset": 0
+        },
+        "single_sided": {
+            "param_type": "enum",
+            "enums": ["false", "true"],
+            "min": null,
+            "max": null,
+            "default": 0,
+            "value_offset": 4
+        },
+        "density": {
+            "param_type": "enum",
+            "enums": ["MFM", "FM"],
+            "min": null,
+            "max": null,
+            "default": 0,
+            "value_offset": 5
         }
     },
     "TC8566AF": {
@@ -33,6 +49,14 @@
             "max": null,
             "default": 0,
             "value_offset": 0
+        },
+        "single_sided": {
+            "param_type": "enum",
+            "enums": ["false", "true"],
+            "min": null,
+            "max": null,
+            "default": 0,
+            "value_offset": 4
         }
     },
     "MEM_MAPPER": {
@@ -88,6 +112,16 @@
             "enums": ["false", "true"],
             "min": 0,
             "max": 1,
+            "default": 0
+        }
+    },
+    "OPL4": {
+        "sampleram": {
+            "param_type": "int",
+            "enums": [],
+            "min": 0,
+            "max": 16,
+            "div": 131072,
             "default": 0
         }
     },
