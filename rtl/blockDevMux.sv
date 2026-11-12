@@ -2,39 +2,21 @@
 //
 // Copyright (c) 2025 Molekula
 //
-// All rights reserved
+// This program is free software: you can redistribute it and/or modify it under the terms of
+// the GNU General Public License as published by the Free Software Foundation, either version 3
+// of the License, or (at your option) any later version.
 //
-// Redistribution and use in source and synthezised forms, with or without
-// modification, are permitted provided that the following conditions are met:
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+// without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU General Public License for more details.
 //
-// * Redistributions of source code must retain the above copyright notice,
-//   this list of conditions and the following disclaimer.
+// You should have received a copy of the GNU General Public License along with this program.
+// If not, see <https://www.gnu.org/licenses/>.
 //
-// * Redistributions in synthesized form must reproduce the above copyright
-//   notice, this list of conditions and the following disclaimer in the
-//   documentation and/or other materials provided with the distribution.
-//
-// * Neither the name of the author nor the names of other contributors may
-//   be used to endorse or promote products derived from this software without
-//   specific prior written agreement from the author.
-//
-// * License is granted for non-commercial use only.  A fee may not be charged
-//   for redistributions as source code or in synthesized/hardware form without
-//   specific prior written agreement from the author.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE
-// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-// POSSIBILITY OF SUCH DAMAGE.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+// block_device_FDD[i] = hps_io VD i+1, VDNUM = 1 + 2*MSX::N_FDC
 module blockDevMux #(parameter VDNUM) (
     input                     clk,
     input                     reset,
@@ -57,34 +39,33 @@ module blockDevMux #(parameter VDNUM) (
     input              [63:0] img_size,
     input                     img_readonly,
     
-    block_device_if.hps_mp    block_device_FDD[6],
-    block_device_if.hps_mp    block_device_SD,
-    block_device_if.hps_mp    block_device_nvram[4]
+    block_device_if.hps_mp    block_device_FDD[VDNUM-1],
+    block_device_if.hps_mp    block_device_SD
 );
 
-    logic [23:0] FDD_image_size[6];
-    logic  [5:0] FDD_image_ro;
-    logic  [5:0] FDD_image_mounted;
+    // FDD images: size and read-only latched per drive (img_size / img_readonly of hps_io are
+    // valid only with the img_mounted pulse); img_mounted itself goes on as the 1 clk event
+    // "image (re)mounted", as for the SD card. A mounted image survives a core reset.
+    logic [23:0] FDD_image_size[VDNUM-1];
+    logic [VDNUM-2:0] FDD_image_ro;
 
     initial begin
         FDD_image_size     = '{default: 24'd0};
-        FDD_image_ro       = 6'd0;
-        FDD_image_mounted  = 6'd0;
+        FDD_image_ro       = '0;
     end
 
     always_ff @(posedge clk) begin
-        for (int i = 0; i < 6; i++) begin
+        for (int i = 0; i < VDNUM-1; i++) begin
             if (img_mounted[i+1]) begin
-                FDD_image_size[i]     = img_size[23:0];
-                FDD_image_ro[i]       = img_readonly;
-                FDD_image_mounted[i]  = 1'b1;
+                FDD_image_size[i] <= img_size[23:0];
+                FDD_image_ro[i]   <= img_readonly;
             end
         end
     end
 
     genvar i;
     generate
-        for (i = 0; i < 6; i++) begin : BLOCK_DEVICE_FDD_MAPS
+        for (i = 0; i < VDNUM-1; i++) begin : BLOCK_DEVICE_FDD_MAPS
             assign sd_lba[i+1]                        = block_device_FDD[i].lba;
             assign sd_blk_cnt[i+1]                    = block_device_FDD[i].blk_cnt;
             assign sd_rd[i+1]                         = block_device_FDD[i].rd;
@@ -96,7 +77,7 @@ module blockDevMux #(parameter VDNUM) (
             assign block_device_FDD[i].buff_dout    = sd_buff_dout;
             assign block_device_FDD[i].buff_wr      = msx_config.fdd[i] ? sd_buff_wr : '0;          
             
-            assign block_device_FDD[i].img_mounted  = reset ? '0 : FDD_image_mounted[i];
+            assign block_device_FDD[i].img_mounted  = img_mounted[i+1];
             assign block_device_FDD[i].img_size     = msx_config.fdd[i] ? 64'(FDD_image_size[i]) : 'd0; 
             assign block_device_FDD[i].img_readonly = FDD_image_ro[i];
             

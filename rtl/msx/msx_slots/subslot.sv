@@ -2,37 +2,18 @@
 //
 // Copyright (c) 2024 Molekula
 //
-// All rights reserved
+// This program is free software: you can redistribute it and/or modify it under the terms of
+// the GNU General Public License as published by the Free Software Foundation, either version 3
+// of the License, or (at your option) any later version.
 //
-// Redistribution and use in source and synthezised forms, with or without
-// modification, are permitted provided that the following conditions are met:
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+// without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU General Public License for more details.
 //
-// * Redistributions of source code must retain the above copyright notice,
-//   this list of conditions and the following disclaimer.
+// You should have received a copy of the GNU General Public License along with this program.
+// If not, see <https://www.gnu.org/licenses/>.
 //
-// * Redistributions in synthesized form must reproduce the above copyright
-//   notice, this list of conditions and the following disclaimer in the
-//   documentation and/or other materials provided with the distribution.
-//
-// * Neither the name of the author nor the names of other contributors may
-//   be used to endorse or promote products derived from this software without
-//   specific prior written agreement from the author.
-//
-// * License is granted for non-commercial use only.  A fee may not be charged
-//   for redistributions as source code or in synthesized/hardware form without
-//   specific prior written agreement from the author.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE
-// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-// POSSIBILITY OF SUCH DAMAGE.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 module subslot (
@@ -42,7 +23,8 @@ module subslot (
     input                   expander_force_en,        // Enable signals for the expander
     output            [7:0] data,           // Data output
     output            [1:0] active_subslot, // Currently active subslot
-    output                  output_rq      // Chip select signal
+    output                  output_rq,     // Read of the register (data priority)
+    output                  cs             // Any access to the register: hides the memory below
 );
 
     // Array to store mapper slot data for 4 slots
@@ -57,8 +39,8 @@ module subslot (
     // Read enable is active when chip select and read request are active
     wire mapper_rd = mapper_cs && cpu_bus.rd;// && ~expander_wo;
 
-    // On clock or reset, update the mapper_slot data
-    always @(posedge cpu_bus.clk or posedge cpu_bus.reset) begin
+    // Sync reset: async reset loading a non-constant init was synthesized as latches
+    always_ff @(posedge cpu_bus.clk) begin
         if (cpu_bus.reset) begin
             // Initialize mapper_slot array on reset
             mapper_slot[0] <= slot_expander_conf[0].init;
@@ -80,7 +62,7 @@ module subslot (
     // Select the active subslot based on the block and the current mapper_slot value
     assign active_subslot = mapper_slot[active_slot][(3'd2 * block) +: 2];  
 
-    // Chip select output signal
     assign output_rq = mapper_rd;
+    assign cs        = mapper_cs;
 
 endmodule

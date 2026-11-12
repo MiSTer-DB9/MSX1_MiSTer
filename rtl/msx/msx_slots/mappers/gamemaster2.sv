@@ -2,43 +2,24 @@
 //
 // Copyright (c) 2024 Molekula
 //
-// All rights reserved
+// This program is free software: you can redistribute it and/or modify it under the terms of
+// the GNU General Public License as published by the Free Software Foundation, either version 3
+// of the License, or (at your option) any later version.
 //
-// Redistribution and use in source and synthezised forms, with or without
-// modification, are permitted provided that the following conditions are met:
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+// without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU General Public License for more details.
 //
-// * Redistributions of source code must retain the above copyright notice,
-//   this list of conditions and the following disclaimer.
+// You should have received a copy of the GNU General Public License along with this program.
+// If not, see <https://www.gnu.org/licenses/>.
 //
-// * Redistributions in synthesized form must reproduce the above copyright
-//   notice, this list of conditions and the following disclaimer in the
-//   documentation and/or other materials provided with the distribution.
-//
-// * Neither the name of the author nor the names of other contributors may
-//   be used to endorse or promote products derived from this software without
-//   specific prior written agreement from the author.
-//
-// * License is granted for non-commercial use only.  A fee may not be charged
-//   for redistributions as source code or in synthesized/hardware form without
-//   specific prior written agreement from the author.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE
-// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-// POSSIBILITY OF SUCH DAMAGE.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 module mapper_gamemaster2 (
     cpu_bus_if.device_mp    cpu_bus,   // Interface for CPU communication
-    mapper_out              out,       // Interface for mapper output
-    block_info              block_info // Struct containing mapper configuration and parameters
+    output MSX::mapper_out_t out,       // Mapper output, merged in mappers.sv
+    input  MSX::block_info_t block_info // Active block (slot layout entry)
 );
 
     // Memory mapping control signals
@@ -56,8 +37,8 @@ module mapper_gamemaster2 (
     // Bank registers for memory mapping
     logic [5:0] bank1, bank2, bank3;
 
-    // Bank switching logic based on CPU reset and clock signals
-    always @(posedge cpu_bus.reset or posedge cpu_bus.clk) begin
+    // Bank switching logic
+    always_ff @(posedge cpu_bus.clk) begin
         if (cpu_bus.reset) begin
             // Initialize banks after reset
             bank1 <= 6'h01;  // Default bank 1
@@ -92,8 +73,12 @@ module mapper_gamemaster2 (
 
     // Output control signals
     assign out.sram_cs = cs && sram_en;  // SRAM chip select
+    assign out.main_cs = 1'b0;
     assign out.ram_cs  = cs && ram_en;   // RAM chip select
     assign out.rnw     = ~(out.sram_cs && cpu_bus.wr && cpu_bus.addr[15:12] == 4'hB);  // Read/Write control signal
     assign out.addr    = cs ? (sram_en ? sram_addr : ram_addr) : {27{1'b1}};  // Address output, default to all 1s if not selected
+
+    // outputs not used by this mapper: neutral for the merge in mappers.sv
+    assign out.data    = 8'hFF;
 
 endmodule

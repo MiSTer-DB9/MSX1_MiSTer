@@ -2,6 +2,7 @@ import os
 import xml.etree.ElementTree as ET
 import struct
 import logging
+import argparse
 from tools import load_constants, find_files_with_sha1, find_xml_files, convert_to_int_or_string, get_int_or_string_value, convert_to_8bit, convert_to_int, get_device_param
 
 # Nastavení logování
@@ -28,7 +29,7 @@ def create_block_entry(constants: dict, block_type: str, address: int, sha1: str
         
     return block_entry
 
-def parse_fw_block(root: ET.Element, subslot: int, files_with_sha1: dict, constants: dict) -> list:
+def parse_fw_block(root: ET.Element, subslot: int, files_with_sha1: dict, constants: dict, name: str = '') -> list:
     block = {}
     result = []
     start = int(root.attrib.get("start", 0))
@@ -36,13 +37,15 @@ def parse_fw_block(root: ET.Element, subslot: int, files_with_sha1: dict, consta
     offset = int(root.attrib.get("offset", -1))
     fix_offset = int(root.attrib.get("fix_offset", -1))
 
+    dev_el = None
     for element in root:
-        if element.tag in ['SHA1', 'filename', 'device', 'mapper', 'sram', 'ram', 'device_param']:
+        if element.tag in ['SHA1', 'filename', 'device', 'mapper', 'sram', 'ram', 'flash', 'extend', 'device_param']:
             block[element.tag] = get_int_or_string_value(element)
             if element.tag == 'ram' :
                 pattern = 1;
             
             if element.tag == 'device' :
+                dev_el = element
                 device_port = convert_to_8bit(element.attrib.get('port'))
                 device_mask = convert_to_8bit(element.attrib.get('mask'))
                 device_param = convert_to_8bit(element.attrib.get('param','0'))
@@ -67,8 +70,18 @@ def parse_fw_block(root: ET.Element, subslot: int, files_with_sha1: dict, consta
         if block['SHA1'] in files_with_sha1:
             result.append(create_block_entry(constants, 'ROM', address, sha1=block['SHA1'], file_size=file_size, file_skip_bytes=file_skip_bytes))
         else:
-            logger.warning(f"Missing ROM. SHA1: {block['SHA1']}")
+            logger.warning(f"Missing ROM '{block.get('filename', '?')}' for cartridge {name}. SHA1: {block['SHA1']}")
     
+    for tag in ('flash', 'extend'):
+        # the memory loaded so far (cartridge ROM, ROM of the block) is extended to this size and the
+        # rest filled with FF: a flash chip, or RAM behind a ROM (MoonSound sample memory)
+        if tag in block:
+            blocks = convert_to_int(block[tag]) // (1024 * 16)
+            if 0 < blocks < 0x2000:
+                result.append(create_block_entry(constants, 'FLASH', address, param1=blocks >> 8, param2=blocks & 0xFF))
+            else:
+                logger.warning("Flash / extend size not defined correctly")
+
     if 'ram' in block:
         size = convert_to_int(block['ram'])
         if size :
@@ -93,8 +106,10 @@ def parse_fw_block(root: ET.Element, subslot: int, files_with_sha1: dict, consta
             device_id = constants['device'][block['device']]
             param_dev = 0
             parameter = 0
-            if (element.attrib):
-                param_dev = get_device_param(constants, block['device'], element.attrib)
+            if dev_el is not None and dev_el.attrib:
+                param_dev = get_device_param(constants, block['device'], dev_el.attrib)
+                if dev_el.attrib.get('memory') == 'block':      # the device uses the memory of this block
+                    parameter = 1
 
             result.append(create_block_entry(constants, 'DEVICE', address, param1=device_id, param2 = param_dev, param3=parameter))
             if device_port is not None:
@@ -111,11 +126,11 @@ def parse_fw_block(root: ET.Element, subslot: int, files_with_sha1: dict, consta
 
     return result
 
-def parse_fw_secondary(root: ET.Element, subslot: int, files_with_sha1: dict, constants: dict) -> list:
+def parse_fw_secondary(root: ET.Element, subslot: int, files_with_sha1: dict, constants: dict, name: str = '') -> list:
     blocks = []
     for element in root:
         if element.tag == 'block':
-            blocks.extend(parse_fw_block(element, subslot, files_with_sha1, constants))
+            blocks.extend(parse_fw_block(element, subslot, files_with_sha1, constants, name))
     return blocks
 
 def parse_fw(name: str, root: ET.Element, files_with_sha1: dict, constants: dict) -> list:
@@ -123,9 +138,9 @@ def parse_fw(name: str, root: ET.Element, files_with_sha1: dict, constants: dict
     for element in root:
         if element.tag == 'secondary':
             slot = int(element.attrib["slot"])
-            results.extend(parse_fw_secondary(element, slot, files_with_sha1, constants))
+            results.extend(parse_fw_secondary(element, slot, files_with_sha1, constants, name))
         elif element.tag == 'block':
-            results.extend(parse_fw_block(element, 0, files_with_sha1, constants))
+            results.extend(parse_fw_block(element, 0, files_with_sha1, constants, name))
         elif element.tag == 'io_device':
             pass  # Placeholder for future extensions
         elif element.tag == 'expander':
@@ -295,11 +310,22 @@ def create_fw_conf(file_name: str, path: str, files_with_sha1: dict, constants: 
     except (ET.ParseError, FileNotFoundError) as e:
         logger.error(f"Error processing file {file_path}: {e}")
 
-files_with_sha1 = find_files_with_sha1(ROM_DIR)
-constants = load_constants()
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description=f"Build the cartridge FW packs: {XML_DIR}/*.xml -> {DIR_SAVE}/<name>.msx. "
+                    "Run from the CreateMSXpack directory (JSON tables are read from the current directory).")
+    parser.add_argument('--rom-dir', type=str, default=ROM_DIR,
+                        help='Path to the ROM files directory, searched recursively, files matched by SHA1 (default: %(default)s)')
+    args = parser.parse_args()
 
-xml_files = find_xml_files(XML_DIR)
+    if not os.path.isdir(args.rom_dir):
+        parser.error(f"ROM directory not found: {args.rom_dir}")
 
-for file_name, path in xml_files:
-    print(f"NAME: {file_name}")
-    create_fw_conf(file_name, path, files_with_sha1, constants)
+    files_with_sha1 = find_files_with_sha1(args.rom_dir)
+    constants = load_constants()
+
+    xml_files = find_xml_files(XML_DIR)
+
+    for file_name, path in xml_files:
+        print(f"NAME: {file_name}")
+        create_fw_conf(file_name, path, files_with_sha1, constants)

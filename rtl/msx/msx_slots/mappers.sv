@@ -2,37 +2,18 @@
 //
 // Copyright (c) 2024-2025 Molekula
 //
-// All rights reserved
+// This program is free software: you can redistribute it and/or modify it under the terms of
+// the GNU General Public License as published by the Free Software Foundation, either version 3
+// of the License, or (at your option) any later version.
 //
-// Redistribution and use in source and synthezised forms, with or without
-// modification, are permitted provided that the following conditions are met:
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+// without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU General Public License for more details.
 //
-// * Redistributions of source code must retain the above copyright notice,
-//   this list of conditions and the following disclaimer.
+// You should have received a copy of the GNU General Public License along with this program.
+// If not, see <https://www.gnu.org/licenses/>.
 //
-// * Redistributions in synthesized form must reproduce the above copyright
-//   notice, this list of conditions and the following disclaimer in the
-//   documentation and/or other materials provided with the distribution.
-//
-// * Neither the name of the author nor the names of other contributors may
-//   be used to endorse or promote products derived from this software without
-//   specific prior written agreement from the author.
-//
-// * License is granted for non-commercial use only.  A fee may not be charged
-//   for redistributions as source code or in synthesized/hardware form without
-//   specific prior written agreement from the author.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE
-// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-// POSSIBILITY OF SUCH DAMAGE.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 module mappers (
@@ -40,262 +21,264 @@ module mappers (
     cpu_bus_if.device_mp        cpu_bus,            // Interface for CPU communication
     ext_sd_card_if.device_mp    ext_SD_card_bus,    // Interface Ext SD card
     flash_bus_if.device_mp      flash_bus,          // Interface to emulate FLASH
-    block_info                  block_info,         // Struct containing block configuration and parameters
-    device_bus                  device_bus,         // Interface for device control
+    input  MSX::block_info_t block_info,         // Active block (slot layout entry)
+    output MSX::device_bus_t device_bus,         // Cartridge device control (to devices)
     memory_bus_if.device_mp     memory_bus,         // Interface for memory control
+    output                      main_cs,            // memory_bus.addr is an offset in the main RAM
     output                [7:0] data,               // Data output from the active mapper; defaults to FF if no mapper is active
     input                 [7:0] data_to_mapper,
     output                      slot_expander_force_en,
+    output                      mfrsd_expander_off, // MFRSD: slot expander off (register)
     input                       ocm_megaSD_enable,
     input                       ocm_slot1_mode,
-    input                 [1:0] ocm_slot2_mode
+    input                 [1:0] ocm_slot2_mode,
+    input                       ocm_ipl_en,         // OCM IPL ROM visible (before BIOS load)
+    output                      ocm_mmc_on,         // MegaSD window of the ESE-RAM mapped
+    output                      ocm_mmc_wait        // CPU wait: MegaSD SPI busy
 );
 
-    mapper_out offset_out();
+    // One entry per mapper instance. New mapper: add its name before M_COUNT
+    // (D_COUNT if it also controls a device) and connect .out(mapper_out[M_<name>]).
+    typedef enum {
+        M_OFFSET, M_MIRROR, M_MSX2_RAM, M_ASCII8, M_ASCII16, M_GENERIC8K, M_GENERIC16K,
+        M_FM_PAC, M_YAMAHA_SFG, M_KONAMI, M_KONAMI_SCC, M_GM2, M_CROSS_BLAIM, M_NATIONAL,
+        M_HARRY_FOX, M_ZEMINA80, M_ZEMINA90, M_MFRSD, M_ESE_RAM, M_MEGA_RAM, M_OCM_IPL,
+        M_TURBOR_FDC, M_PANASONIC, M_DRAM, M_ASCII16X, M_NEO,
+        M_COUNT
+    } mapper_idx_t;
+
+    typedef enum {
+        D_FM_PAC, D_YAMAHA_SFG, D_KONAMI_SCC, D_MFRSD, D_MEGA_RAM,
+        D_COUNT
+    } device_idx_t;
+
+    MSX::mapper_out_t mapper_out[M_COUNT];
+    MSX::device_bus_t device_out[D_COUNT];
+
     mapper_offset offset (
         .cpu_bus(cpu_bus),
         .block_info(block_info),
-        .out(offset_out)
+        .out(mapper_out[M_OFFSET])
     );
 
-    mapper_out mirror_out();
     mapper_mirror mirror (
         .cpu_bus(cpu_bus),
         .block_info(block_info),
-        .out(mirror_out)
+        .out(mapper_out[M_MIRROR])
     );
 
-    mapper_out msx2_ram_out();
     mapper_msx2_ram msx2_ram (
         .cpu_bus(cpu_bus),
         .block_info(block_info),
-        .out(msx2_ram_out),
+        .out(mapper_out[M_MSX2_RAM]),
         .data_to_mapper(data_to_mapper)
     );
 
-    mapper_out ascii8_out();
     mapper_ascii8 ascii8 (
         .cpu_bus(cpu_bus),
         .block_info(block_info),
-        .out(ascii8_out)
+        .out(mapper_out[M_ASCII8])
     );
 
-    mapper_out ascii16_out();
     mapper_ascii16 ascii16 (
         .cpu_bus(cpu_bus),
         .block_info(block_info),
-        .out(ascii16_out)
+        .out(mapper_out[M_ASCII16])
     );
 
-    mapper_out generic8k_out();
     mapper_generic8k mapper_generic8k (
         .cpu_bus(cpu_bus),
         .block_info(block_info),
-        .out(generic8k_out)
+        .out(mapper_out[M_GENERIC8K])
     );
 
-    mapper_out generic16k_out();
+    mapper_neo neo (
+        .cpu_bus(cpu_bus),
+        .block_info(block_info),
+        .out(mapper_out[M_NEO])
+    );
+
     mapper_generic16k mapper_generic16k (
         .cpu_bus(cpu_bus),
         .block_info(block_info),
-        .out(generic16k_out)
+        .out(mapper_out[M_GENERIC16K])
     );
 
-    mapper_out fm_pac_out();
-    device_bus fm_pac_device_out();
+    mapper_turbor_fdc turbor_fdc (
+        .cpu_bus(cpu_bus),
+        .block_info(block_info),
+        .out(mapper_out[M_TURBOR_FDC])
+    );
+
+    mapper_panasonic panasonic (
+        .cpu_bus(cpu_bus),
+        .block_info(block_info),
+        .out(mapper_out[M_PANASONIC])
+    );
+
+    mapper_dram dram (
+        .cpu_bus(cpu_bus),
+        .block_info(block_info),
+        .out(mapper_out[M_DRAM])
+    );
+
     mapper_fm_pac fm_pac (
         .cpu_bus(cpu_bus),
         .block_info(block_info),
-        .out(fm_pac_out),
-        .device_out(fm_pac_device_out)
+        .out(mapper_out[M_FM_PAC]),
+        .device_out(device_out[D_FM_PAC])
     );
 
-    mapper_out yamaha_sfg_out();
-    device_bus yamaha_sfg_device_out();
     mapper_yamaha_sfg yamaha_sfg (
         .cpu_bus(cpu_bus),
         .block_info(block_info),
-        .out(yamaha_sfg_out),
-        .device_out(yamaha_sfg_device_out)
+        .out(mapper_out[M_YAMAHA_SFG]),
+        .device_out(device_out[D_YAMAHA_SFG])
     );
 
-    mapper_out konami_out();
     mapper_konami konami (
         .cpu_bus(cpu_bus),
         .block_info(block_info),
-        .out(konami_out)
+        .out(mapper_out[M_KONAMI])
     );
 
-    mapper_out konami_SCC_out();
-    device_bus konami_SCC_device_out();
     mapper_konami_scc konami_scc (
         .cpu_bus(cpu_bus),
         .block_info(block_info),
-        .out(konami_SCC_out),
-        .device_out(konami_SCC_device_out)
+        .out(mapper_out[M_KONAMI_SCC]),
+        .device_out(device_out[D_KONAMI_SCC])
     );
 
-    mapper_out gm2_out();
     mapper_gamemaster2 gm2 (
         .cpu_bus(cpu_bus),
         .block_info(block_info),
-        .out(gm2_out)
+        .out(mapper_out[M_GM2])
     );
 
-    mapper_out crossBlaim_out();
     mapper_crossBlaim mapper_crossBlaim (
         .cpu_bus(cpu_bus),
         .block_info(block_info),
-        .out(crossBlaim_out)
+        .out(mapper_out[M_CROSS_BLAIM])
     );
 
-    mapper_out national_out();
     mapper_national national (
         .cpu_bus(cpu_bus),
         .block_info(block_info),
-        .out(national_out)
+        .out(mapper_out[M_NATIONAL])
     );
 
-    mapper_out harryFox_out();
     mapper_harryFox mapper_harryFox (
         .cpu_bus(cpu_bus),
         .block_info(block_info),
-        .out(harryFox_out)
+        .out(mapper_out[M_HARRY_FOX])
     );
 
-    mapper_out zemina80_out();
     mapper_zemina80 mapper_zemina80 (
         .cpu_bus(cpu_bus),
         .block_info(block_info),
-        .out(zemina80_out)
+        .out(mapper_out[M_ZEMINA80])
     );
 
-    mapper_out zemina90_out();
     mapper_zemina90 mapper_zemina90 (
         .cpu_bus(cpu_bus),
         .block_info(block_info),
-        .out(zemina90_out),
+        .out(mapper_out[M_ZEMINA90]),
         .data_to_mapper(data_to_mapper)
     );
     
-    mapper_out mfrsd_out();
-    device_bus mfrsd_device_out();
+    // One flash engine for MFRSD and the ASCII16-X cartridges: inactive mappers drive 0
+    flash_bus_if flash_mfrsd();
+    flash_bus_if flash_ascii16x();
+
+    assign flash_bus.base_addr     = flash_mfrsd.base_addr     | flash_ascii16x.base_addr;
+    assign flash_bus.addr          = flash_mfrsd.addr          | flash_ascii16x.addr;
+    assign flash_bus.area_lo       = flash_mfrsd.area_lo       | flash_ascii16x.area_lo;
+    assign flash_bus.area_size     = flash_mfrsd.area_size     | flash_ascii16x.area_size;
+    assign flash_bus.chip          = flash_mfrsd.chip          | flash_ascii16x.chip;
+    assign flash_bus.id            = flash_mfrsd.id            | flash_ascii16x.id;
+    assign flash_bus.data_to_flash = flash_mfrsd.data_to_flash | flash_ascii16x.data_to_flash;
+    assign flash_bus.we            = flash_mfrsd.we            | flash_ascii16x.we;
+    assign flash_bus.ce            = flash_mfrsd.ce            | flash_ascii16x.ce;
+
+    assign flash_mfrsd.data_from_flash    = flash_bus.data_from_flash;
+    assign flash_mfrsd.data_valid         = flash_bus.data_valid;
+    assign flash_ascii16x.data_from_flash = flash_bus.data_from_flash;
+    assign flash_ascii16x.data_valid      = flash_bus.data_valid;
+
+    mapper_ascii16x ascii16x (
+        .cpu_bus(cpu_bus),
+        .flash_bus(flash_ascii16x),
+        .block_info(block_info),
+        .out(mapper_out[M_ASCII16X])
+    );
+
     ext_sd_card_if ext_SD_card_mfrsd();
     mapper_mfrsd  mapper_mfrsd (
         .cpu_bus(cpu_bus),
         .ext_SD_card_bus(ext_SD_card_mfrsd),
-        .flash_bus(flash_bus),
+        .flash_bus(flash_mfrsd),
         .block_info(block_info),
-        .out(mfrsd_out),
+        .out(mapper_out[M_MFRSD]),
         .data_to_mapper(data_to_mapper),
-        .device_out(mfrsd_device_out),
-        .slot_expander_force_en(slot_expander_force_en)
+        .device_out(device_out[D_MFRSD]),
+        .slot_expander_force_en(slot_expander_force_en),
+        .expander_off(mfrsd_expander_off)
     );
 
-    mapper_out ese_ram_out();
     ext_sd_card_if ext_SD_card_ese();
     mapper_eseRam ese_ram (
         .cpu_bus(cpu_bus),
         .block_info(block_info),
-        .out(ese_ram_out),
+        .out(mapper_out[M_ESE_RAM]),
         .ext_SD_card_bus(ext_SD_card_ese),
-        .megaSD_enable(ocm_megaSD_enable)
+        .megaSD_enable(ocm_megaSD_enable),
+        .mmc_on(ocm_mmc_on),
+        .mmc_wait(ocm_mmc_wait)
     );
 
-    mapper_out mega_ram_out();
-    device_bus mega_ram_device_out();
     mapper_megaram mega_ram (
         .cpu_bus(cpu_bus),
         .block_info(block_info),
-        .out(mega_ram_out),
-        .device_out(mega_ram_device_out),
+        .out(mapper_out[M_MEGA_RAM]),
+        .device_out(device_out[D_MEGA_RAM]),
         .ocm_slot1_mode(ocm_slot1_mode),
         .ocm_slot2_mode(ocm_slot2_mode)
     );
 
-    assign data                 = fm_pac_out.data 
-                                & national_out.data 
-                                & mfrsd_out.data 
-                                & ese_ram_out.data;
+    mapper_ocm_ipl ocm_ipl (
+        .cpu_bus(cpu_bus),
+        .block_info(block_info),
+        .ipl_en(ocm_ipl_en),
+        .out(mapper_out[M_OCM_IPL])
+    );
 
-    assign memory_bus.addr      = offset_out.addr
-                                & mirror_out.addr
-                                & msx2_ram_out.addr
-                                & ascii8_out.addr
-                                & ascii16_out.addr
-                                & generic8k_out.addr
-                                & generic16k_out.addr
-                                & fm_pac_out.addr
-                                & yamaha_sfg_out.addr
-                                & konami_out.addr
-                                & konami_SCC_out.addr
-                                & gm2_out.addr
-                                & national_out.addr
-                                & crossBlaim_out.addr
-                                & harryFox_out.addr
-                                & zemina80_out.addr
-                                & zemina90_out.addr
-                                & mfrsd_out.addr
-                                & ese_ram_out.addr
-                                & mega_ram_out.addr;
+    // Merge: inactive mappers output MSX::*_IDLE, so AND / OR over all entries
+    // selects the active one. Same logic as a hand-written wired-AND / OR.
+    MSX::mapper_out_t mapper_merged;
+    MSX::device_bus_t device_merged;
 
-    assign memory_bus.rnw       = offset_out.rnw
-                                & mirror_out.rnw
-                                & msx2_ram_out.rnw
-                                & ascii8_out.rnw
-                                & ascii16_out.rnw
-                                & fm_pac_out.rnw
-                                & konami_SCC_out.rnw
-                                & gm2_out.rnw
-                                & national_out.rnw
-                                & mfrsd_out.rnw
-                                & ese_ram_out.rnw
-                                & mega_ram_out.rnw;
+    always_comb begin
+        mapper_merged = MSX::MAPPER_OUT_IDLE;
+        for (int i = 0; i < M_COUNT; i++)
+            mapper_merged = MSX::mapper_out_merge(mapper_merged, mapper_out[i]);
 
-    assign memory_bus.ram_cs    = offset_out.ram_cs
-                                | mirror_out.ram_cs
-                                | msx2_ram_out.ram_cs
-                                | ascii8_out.ram_cs
-                                | ascii16_out.ram_cs
-                                | generic8k_out.ram_cs
-                                | generic16k_out.ram_cs
-                                | fm_pac_out.ram_cs
-                                | yamaha_sfg_out.ram_cs
-                                | konami_out.ram_cs
-                                | konami_SCC_out.ram_cs
-                                | gm2_out.ram_cs
-                                | crossBlaim_out.ram_cs
-                                | national_out.ram_cs
-                                | harryFox_out.ram_cs
-                                | zemina80_out.ram_cs
-                                | zemina90_out.ram_cs
-                                | mfrsd_out.ram_cs
-                                | ese_ram_out.ram_cs
-                                | mega_ram_out.ram_cs;
+        device_merged = MSX::DEVICE_BUS_IDLE;
+        for (int i = 0; i < D_COUNT; i++)
+            device_merged = MSX::device_bus_merge(device_merged, device_out[i]);
+    end
 
-    assign memory_bus.sram_cs   = ascii8_out.sram_cs
-                                | ascii16_out.sram_cs
-                                | fm_pac_out.sram_cs
-                                | gm2_out.sram_cs
-                                | national_out.sram_cs;
+    assign data               = mapper_merged.data;
+    assign memory_bus.addr    = mapper_merged.addr;
+    assign memory_bus.rnw     = mapper_merged.rnw;
+    assign memory_bus.ram_cs  = mapper_merged.ram_cs;
+    assign memory_bus.sram_cs = mapper_merged.sram_cs;
+    assign main_cs            = mapper_merged.main_cs;
+    assign memory_bus.data    = '1;
 
-    assign memory_bus.data      = '1;
-
-    assign device_bus.we        = fm_pac_device_out.we 
-                                | yamaha_sfg_device_out.we;
-
-    assign device_bus.en        = fm_pac_device_out.en 
-                                | yamaha_sfg_device_out.en 
-                                | konami_SCC_device_out.en 
-                                | mfrsd_device_out.en 
-                                | mega_ram_device_out.en;
-
-    assign device_bus.mode      = konami_SCC_device_out.mode 
-                                & mfrsd_device_out.mode;
-
-    assign device_bus.param     = konami_SCC_device_out.param 
-                                & mfrsd_device_out.param;
-
+    assign device_bus.we         = device_merged.we;
+    assign device_bus.en         = device_merged.en;
+    assign device_bus.mode       = device_merged.mode;
+    assign device_bus.param      = device_merged.param;
     assign device_bus.device_ref = cpu_bus.mreq ? block_info.device_ref : '0;
 
     // SDCARD
@@ -304,5 +287,7 @@ module mappers (
     assign ext_SD_card_bus.data_to_SD     = ext_SD_card_ese.data_to_SD &  ext_SD_card_mfrsd.data_to_SD;
     assign ext_SD_card_mfrsd.data_from_SD = ext_SD_card_bus.data_from_SD;
     assign ext_SD_card_ese.data_from_SD   = ext_SD_card_bus.data_from_SD;
+    assign ext_SD_card_mfrsd.busy         = ext_SD_card_bus.busy;
+    assign ext_SD_card_ese.busy           = ext_SD_card_bus.busy;
 
 endmodule

@@ -1,41 +1,53 @@
-module motor #(parameter TIMEOUTms = 16'd30000, DELAYms = 3'd3) (
+// motor
+//
+// Copyright (c) 2025-2026 Molekula
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of
+// the GNU General Public License as published by the Free Software Foundation, either version 3
+// of the License, or (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+// without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with this program.
+// If not, see <https://www.gnu.org/licenses/>.
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// Spindle motors of the two drives. MOTORn applies to the selected drive; the motor runs
+// SPINUP_MS after it is switched on and keeps running off_ms after it is switched off
+// (openMSX motor_off_timeout_ms: 4000 for the Sony interfaces, 0 for the others).
+module motor #(parameter int SPINUP_MS = 3)
+(
     input  logic        clk,
-    input  logic        msclk,  // 1ms clock
+    input  logic        msclk,          // 1 ms enable
     input  logic        reset,
+    input  logic [15:0] off_ms,
     input  logic        USEL,
     input  logic        MOTORn,
     output logic  [1:0] motor_run
 );
-
-    logic [15:0] motor_timeout[3:0];  // Použití logického typu místo int
-    logic [2:0]  motor_delay[3:0];    // Maximální hodnota 8 ms, stačí 3 bity
+    logic  [2:0] spin[2];
+    logic [15:0] hold[2];
 
     genvar i;
     generate
         for (i = 0; i < 2; i++) begin : MOTOR_I
-            always_ff @(posedge clk or posedge reset) begin
+            always_ff @(posedge clk) begin
                 if (reset) begin
-                    motor_timeout[i] <= 0;
-                    motor_delay[i]   <= DELAYms;
-                end else if (USEL == i) begin
-                    if (!MOTORn) begin
-                        if (motor_delay[i] != 0 && msclk) 
-                            motor_delay[i] <= motor_delay[i] - 3'd1;  // Probíhá rozjezd
-                        else 
-                            motor_timeout[i] <= TIMEOUTms;         // Motor běží
-                    end else if (motor_timeout[i] > 0 && msclk) begin
-                        motor_timeout[i] <= motor_timeout[i] - 16'd1;  // Čekání na vypnutí
-                    end else begin
-                        motor_delay[i] <= DELAYms;                 // Reset rozjezdu po vypnutí
-                    end
-                end else if (motor_timeout[i] > 0 && msclk) begin
-                    motor_timeout[i] <= motor_timeout[i] - 16'd1;      // Čekání na vypnutí (ostatní motory)
+                    spin[i] <= '0;
+                    hold[i] <= '0;
+                end else if (USEL == i && !MOTORn) begin
+                    hold[i] <= off_ms;
+                    if (msclk && spin[i] != 3'(SPINUP_MS)) spin[i] <= spin[i] + 3'd1;
+                end else if (hold[i] != '0) begin
+                    if (msclk) hold[i] <= hold[i] - 16'd1;
                 end else begin
-                    motor_delay[i] <= DELAYms;
+                    spin[i] <= '0;
                 end
             end
-            
-            assign motor_run[i] = (motor_timeout[i] != 0);
+            assign motor_run[i] = spin[i] == 3'(SPINUP_MS);
         end
     endgenerate
 

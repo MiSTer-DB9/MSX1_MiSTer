@@ -2,51 +2,35 @@
 //
 // Copyright (c) 2025 Molekula
 //
-// All rights reserved
+// This program is free software: you can redistribute it and/or modify it under the terms of
+// the GNU General Public License as published by the Free Software Foundation, either version 3
+// of the License, or (at your option) any later version.
 //
-// Redistribution and use in source and synthezised forms, with or without
-// modification, are permitted provided that the following conditions are met:
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+// without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU General Public License for more details.
 //
-// * Redistributions of source code must retain the above copyright notice,
-//   this list of conditions and the following disclaimer.
+// You should have received a copy of the GNU General Public License along with this program.
+// If not, see <https://www.gnu.org/licenses/>.
 //
-// * Redistributions in synthesized form must reproduce the above copyright
-//   notice, this list of conditions and the following disclaimer in the
-//   documentation and/or other materials provided with the distribution.
-//
-// * Neither the name of the author nor the names of other contributors may
-//   be used to endorse or promote products derived from this software without
-//   specific prior written agreement from the author.
-//
-// * License is granted for non-commercial use only.  A fee may not be charged
-//   for redistributions as source code or in synthesized/hardware form without
-//   specific prior written agreement from the author.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE
-// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-// POSSIBILITY OF SUCH DAMAGE.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-module dev_opm #(parameter COUNT=3) (
+module dev_opm #(parameter COUNT = MSX::N_OPM) (   // synthesized copies, io_device has 3 slots
     cpu_bus_if.device_mp   cpu_bus,
-    device_bus             device_bus,
+    input  MSX::device_bus_t device_bus,
     clock_bus_if.base_mp   clock_bus,
-    input MSX::io_device_t io_device[COUNT],
-    output signed [15:0]   sound_L,
-    output signed [15:0]   sound_R,
+    input MSX::io_device_t io_device[3],
+    output MSX::sound_t    sound_L,
+    output MSX::sound_t    sound_R,
     output         [7:0]   data,
     output                 irq
 );
-    
-    logic signed [15:0] sound_L_accum, sound_R_accum;
+
+    logic signed [15:0] sound_OPM_L[3], sound_OPM_R[3];     // only [0 .. COUNT-1] used
+    logic         [7:0] jt51_data_out[3];
+    logic               irq_n[3];
+    MSX::sound_t sound_L_accum, sound_R_accum;
     logic [7:0] data_comb;
     logic irq_comb;
     always_comb begin
@@ -69,15 +53,18 @@ module dev_opm #(parameter COUNT=3) (
     assign irq     = ~irq_comb;
     assign data    = data_comb;
 
-    logic signed [15:0] sound_OPM_L[COUNT], sound_OPM_R[COUNT];
-    logic         [7:0] jt51_data_out[COUNT];
-    logic               irq_n[COUNT];
     logic               io_en;
     
     assign io_en = cpu_bus.iorq && ~cpu_bus.m1;
 
     genvar i;
     generate
+        for (i = COUNT; i < 3; i++) begin : OPM_UNUSED
+            assign sound_OPM_L[i]   = '0;
+            assign sound_OPM_R[i]   = '0;
+            assign jt51_data_out[i] = 8'hFF;
+            assign irq_n[i]         = 1'b1;
+        end
         for (i = 0; i < COUNT; i++) begin : OPM_INSTANCES
             wire cs_io_active = (cpu_bus.addr[7:0] & io_device[i].mask) == io_device[i].port;
             wire cs_io        = (io_device[i].enable && cs_io_active && io_en);

@@ -310,6 +310,8 @@ logic REQ_VSYNC_INT_N;
 logic HSYNCINT_N;
 logic CLR_HSYNC_INT;
 logic REQ_HSYNC_INT_N;
+logic FH_LEVEL;
+logic REQ_HSYNC_S1_N;     // S#1 FH as read: the latch with IE1 on, the line level with IE1 off
 
 logic DVIDEOHS_N;
 
@@ -324,6 +326,8 @@ logic PREWINDOW_SP;
 
 // FOR FRAME ZONE
 logic BWINDOW_X;
+logic OWINDOW_X;
+logic OWINDOW_Y;
 logic BWINDOW_Y;
 logic BWINDOW;
 logic FF_HBLANK;
@@ -440,6 +444,7 @@ logic [8:0] PALETTEDATARGB_OUT;
 // VDP COMMAND SIGNALS
 logic [7:0] VDPCMDCLR;
 logic VDPCMDCE;
+logic VDPCMDROWSTEP, VDPCMDMINORSTEP, VDP_CMD_XFER;
 logic VDPCMDBD;
 logic VDPCMDTR;
 logic [10:0] VDPCMDSXTMP;
@@ -459,7 +464,6 @@ logic VDPCMDVRAMRDREQ;
 logic [16:0] VDPCMDVRAMACCESSADDR;
 logic [7:0] VDPCMDVRAMWRDATA;
 
-logic VDP_COMMAND_DRIVE;
 logic VDP_COMMAND_ACTIVE;
 logic [7:4] CUR_VDP_COMMAND;
 
@@ -552,8 +556,12 @@ VDP_INTERRUPT U_INTERRUPT (
     .CLR_HSYNC_INT          (CLR_HSYNC_INT),
     .REQ_VSYNC_INT_N        (REQ_VSYNC_INT_N),
     .REQ_HSYNC_INT_N        (REQ_HSYNC_INT_N),
-    .REG_R19_HSYNC_INT_LINE (REG_R19_HSYNC_INT_LINE)
+    .FH_LEVEL               (FH_LEVEL),
+    .REG_R19_HSYNC_INT_LINE (REG_R19_HSYNC_INT_LINE),
+    .REG_R0_HSYNC_INT_EN    (REG_R0_HSYNC_INT_EN)
 );
+
+assign REQ_HSYNC_S1_N = REG_R0_HSYNC_INT_EN ? REQ_HSYNC_INT_N : ~FH_LEVEL;
 
 always_ff @(posedge CLK21M) begin
     if (PREDOTCOUNTER_X == 9'd255) begin
@@ -580,6 +588,8 @@ VDP_SSG U_SSG (
     .PREWINDOW_Y_SP         (PREWINDOW_Y_SP),
     .FIELD                  (FIELD),
     .WINDOW_X               (WINDOW_X),
+    .OWINDOW_X              (OWINDOW_X),
+    .OWINDOW_Y              (OWINDOW_Y),
     .PVIDEODHCLK            (PVIDEODHCLK),
     .PVIDEODLCLK            (PVIDEODLCLK),
     .IVIDEOVS_N             (IVIDEOVS_N),
@@ -662,8 +672,8 @@ always_ff @(posedge CLK21M or posedge RESET) begin
             FF_HBLANK <= ~BWINDOW_X;
             FF_VBLANK <= ~BWINDOW_Y;
         end else begin
-            FF_HBLANK <= ~WINDOW_X;
-            FF_VBLANK <= ~PREWINDOW_Y;
+            FF_HBLANK <= ~OWINDOW_X;
+            FF_VBLANK <= ~OWINDOW_Y;
         end
     end
 end
@@ -745,7 +755,7 @@ always_ff @(posedge CLK21M or posedge RESET) begin
 
         VDPCMDVRAMWRACK <= 1'b0;
         VDPCMDVRAMREADINGR <= 1'b0;
-        VDP_COMMAND_DRIVE <= 1'b0;
+        VDP_CMD_XFER <= 1'b0;
     end else begin
         //------------------------------------------
         // MAIN STATE
@@ -798,12 +808,8 @@ always_ff @(posedge CLK21M or posedge RESET) begin
             VRAMACCESSSWITCH = VRAM_ACCESS_DRAW;
         end
 
-        if ((VRAMACCESSSWITCH == VRAM_ACCESS_VDPW) || (VRAMACCESSSWITCH == VRAM_ACCESS_VDPR) ||
-            (VRAMACCESSSWITCH == VRAM_ACCESS_VDPS)) begin
-            VDP_COMMAND_DRIVE <= 1'b1;
-        end else begin
-            VDP_COMMAND_DRIVE <= 1'b0;
-        end
+        // a real command access (uses a token of vdp_access_slots)
+        VDP_CMD_XFER <= (VRAMACCESSSWITCH == VRAM_ACCESS_VDPW) || (VRAMACCESSSWITCH == VRAM_ACCESS_VDPR);
 
         //-----------------------------------------
         // VRAM ACCESS ADDRESS SWITCH
@@ -1060,7 +1066,7 @@ VDP_SPRITE U_SPRITE (
     .EIGHTDOTSTATE              (EIGHTDOTSTATE),
     .DOTCOUNTERX                (PREDOTCOUNTER_X),
     .DOTCOUNTERYP               (PREDOTCOUNTER_YP),
-    .BWINDOW_Y                  (BWINDOW_Y),
+    .BWINDOW_Y                  (PREWINDOW_Y_SP),   // same Y window as the VRAM arbiter
     .PVDPS0SPCOLLISIONINCIDENCE (VDPS0SPCOLLISIONINCIDENCE),
     .PVDPS0SPOVERMAPPED         (VDPS0SPOVERMAPPED),
     .PVDPS0SPOVERMAPPEDNUM      (VDPS0SPOVERMAPPEDNUM),
@@ -1149,7 +1155,7 @@ VDP_REGISTER U_VDP_REGISTER (
     .CLR_VSYNC_INT          (CLR_VSYNC_INT),
     .CLR_HSYNC_INT          (CLR_HSYNC_INT),
     .REQ_VSYNC_INT_N        (REQ_VSYNC_INT_N),
-    .REQ_HSYNC_INT_N        (REQ_HSYNC_INT_N),
+    .REQ_HSYNC_INT_N        (REQ_HSYNC_S1_N),
 
     .REG_R0_HSYNC_INT_EN    (REG_R0_HSYNC_INT_EN),
     .REG_R1_SP_SIZE         (REG_R1_SP_SIZE),
@@ -1234,23 +1240,29 @@ VDP_COMMAND U_VDP_COMMAND (
     .PTR                 (VDPCMDTR),
     .PSXTMP              (VDPCMDSXTMP),
     .CUR_VDP_COMMAND     (CUR_VDP_COMMAND),
+    .PROWSTEP            (VDPCMDROWSTEP),
+    .PMINORSTEP          (VDPCMDMINORSTEP),
     .REG_R25_CMD         (REG_R25_CMD)
 );
 
-VDP_WAIT_CONTROL U_VDP_WAIT_CONTROL (
+// Command engine VRAM access timing as openMSX (vdp_access_slots.sv)
+VDP_ACCESS_SLOTS U_VDP_ACCESS_SLOTS (
     .RESET               (RESET),
     .CLK21M              (CLK21M),
 
-    .VDP_COMMAND         (CUR_VDP_COMMAND),
+    .H_CNT               (H_CNT),
+    .DISP_LINE           (PREWINDOW_Y & REG_R1_DISP_ON),
+    .SPRITES             (~REG_R8_SP_OFF),
+    .BITMAP              (VDPMODEGRAPHIC4 | VDPMODEGRAPHIC5 | VDPMODEGRAPHIC6 | VDPMODEGRAPHIC7),
+    .TEXT                (TEXT_MODE),
 
-    .VDPR9PALMODE        (VDPR9PALMODE),
-    .REG_R1_DISP_ON      (REG_R1_DISP_ON),
-    .REG_R8_SP_OFF       (REG_R8_SP_OFF),
-    .REG_R9_Y_DOTS       (REG_R9_Y_DOTS),
+    .VDP_COMMAND         (CUR_VDP_COMMAND),
+    .CE                  (VDPCMDCE),
+    .XFER                (VDP_CMD_XFER),
+    .ROWSTEP             (VDPCMDROWSTEP),
+    .MINORSTEP           (VDPCMDMINORSTEP),
 
     .VDPSPEEDMODE        (VDPSPEEDMODE),
-    .DRIVE               (VDP_COMMAND_DRIVE),
-
     .ACTIVE              (VDP_COMMAND_ACTIVE)
 );
 
