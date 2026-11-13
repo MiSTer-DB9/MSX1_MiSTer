@@ -40,7 +40,6 @@ wire   [15:0] audio_L, audio_R;
 wire   [27:0] ddr3_addr;
 wire          ddr3_rd, ddr3_ready;
 wire    [7:0] ddr3_dout;
-wire   [63:0] ddr3_dout64;
 
 block_device_if block_device_FDD[2*MSX::N_FDC]();
 ext_sd_card_if  ext_SD_card_bus();
@@ -64,7 +63,7 @@ logic [10:0] ps2_key = '0;                              // +dos: Space presses (
 msx_system sys (
     .clock_bus(clock_bus), .rst_core_async(rst_core_async), .reset(reset),
     .status(status), .status_menumask(status_menumask), .info_req(info_req), .info(info),
-    .ps2_key(ps2_key), .ps2_mouse(25'd0), .joy(joy), .ioctl_download(ioctl_download), .ioctl_index(ioctl_index),
+    .ps2_key(ps2_key), .osd_status(1'b0), .ps2_mouse(25'd0), .joy(joy), .ioctl_download(ioctl_download), .ioctl_index(ioctl_index),
     .ioctl_addr(ioctl_addr), .rtc(65'd0), .sdram_sz(16'h8002), .uart_speed(32'd115200),
     .img_readonly(1'b0), .img_size(64'd0), .sd_img_mounted(1'b0),
     .block_device_FDD(block_device_FDD), .msx_config(msx_config),
@@ -72,7 +71,7 @@ msx_system sys (
     .ext_SD_card_bus(ext_SD_card_bus),
     .memory_bus_sdram_ch1(sd_ch1), .memory_bus_sdram_ch2(sd_ch2), .memory_bus_sdram_ch3(sd_ch3),
     .wave_bus_sdram_ch4(sd_ch4), .cpu_phase(cpu_phase),
-    .ddr3_addr(ddr3_addr), .ddr3_rd(ddr3_rd), .ddr3_dout(ddr3_dout), .ddr3_dout64(ddr3_dout64),
+    .ddr3_addr(ddr3_addr), .ddr3_rd(ddr3_rd), .ddr3_dout(ddr3_dout),
     .ddr3_ready(ddr3_ready)
 );
 
@@ -87,7 +86,7 @@ ddram ddr (
     .DDRAM_ADDR(DDRAM_ADDR), .DDRAM_DOUT(DDRAM_DOUT), .DDRAM_DOUT_READY(DDRAM_DOUT_READY),
     .DDRAM_RD(DDRAM_RD), .DDRAM_DIN(DDRAM_DIN), .DDRAM_BE(DDRAM_BE), .DDRAM_WE(DDRAM_WE),
     .addr(ddr3_addr), .dout(ddr3_dout), .din(8'h00), .we(1'b0), .rd(ddr3_rd), .ready(ddr3_ready),
-    .dout64(ddr3_dout64)
+    .dout64()
 );
 
 logic [28:0] ddr_rd_addr;
@@ -478,14 +477,14 @@ initial begin
     if (fw.size() > 0) begin
         ioctl_index = 16'd2; ioctl_download = 1;
         @(posedge clk_core); ioctl_addr = 27'(fw.size());
-        @(posedge clk_core); ioctl_download = 0;
+        @(posedge clk_core); ioctl_download = 0; ioctl_addr = ioctl_addr + 1'd1;   // hps_io: +1 at the end
         wait (sys.upload);
         wait (!sys.upload);
         repeat (10) @(posedge clk_core);
     end
     ioctl_index = 16'd1; ioctl_download = 1;
     @(posedge clk_core); ioctl_addr = 27'(pack.size());
-    @(posedge clk_core); ioctl_download = 0;
+    @(posedge clk_core); ioctl_download = 0; ioctl_addr = ioctl_addr + 1'd1;   // hps_io: +1 at the end
     wait (sys.upload);
     wait (!sys.upload);
     $display("%0t pack loaded, error=%0d", $time, sys.error);

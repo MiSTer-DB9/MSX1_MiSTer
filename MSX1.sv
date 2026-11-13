@@ -17,167 +17,8 @@
 //============================================================================
 module emu
 (
-   //Master input clock
-   input         CLK_50M,
-
-   //Async reset from top-level module.
-   //Can be used as initial reset.
-   input         RESET,
-
-   //Must be passed to hps_io module
-   inout  [48:0] HPS_BUS,
-
-   //Base video clock. Usually equals to CLK_SYS.
-   output        CLK_VIDEO,
-
-   //Multiple resolutions are supported using different CE_PIXEL rates.
-   //Must be based on CLK_VIDEO
-   output        CE_PIXEL,
-
-   //Video aspect ratio for HDMI. Most retro systems have ratio 4:3.
-   //if VIDEO_ARX[12] or VIDEO_ARY[12] is set then [11:0] contains scaled size instead of aspect ratio.
-   output [12:0] VIDEO_ARX,
-   output [12:0] VIDEO_ARY,
-
-   output  [7:0] VGA_R,
-   output  [7:0] VGA_G,
-   output  [7:0] VGA_B,
-   output        VGA_HS,
-   output        VGA_VS,
-   output        VGA_DE,    // = ~(VBlank | HBlank)
-   output        VGA_F1,
-   output [1:0]  VGA_SL,
-   output        VGA_SCALER, // Force VGA scaler
-   output        VGA_DISABLE, // analog out is off
-
-   input  [11:0] HDMI_WIDTH,
-   input  [11:0] HDMI_HEIGHT,
-   output        HDMI_FREEZE,
-   output        HDMI_BLACKOUT,
-   output        HDMI_BOB_DEINT,
-
-`ifdef MISTER_FB
-   // Use framebuffer in DDRAM
-   // FB_FORMAT:
-   //    [2:0] : 011=8bpp(palette) 100=16bpp 101=24bpp 110=32bpp
-   //    [3]   : 0=16bits 565 1=16bits 1555
-   //    [4]   : 0=RGB  1=BGR (for 16/24/32 modes)
-   //
-   // FB_STRIDE either 0 (rounded to 256 bytes) or multiple of pixel size (in bytes)
-   output        FB_EN,
-   output  [4:0] FB_FORMAT,
-   output [11:0] FB_WIDTH,
-   output [11:0] FB_HEIGHT,
-   output [31:0] FB_BASE,
-   output [13:0] FB_STRIDE,
-   input         FB_VBL,
-   input         FB_LL,
-   output        FB_FORCE_BLANK,
-
-`ifdef MISTER_FB_PALETTE
-   // Palette control for 8bit modes.
-   // Ignored for other video modes.
-   output        FB_PAL_CLK,
-   output  [7:0] FB_PAL_ADDR,
-   output [23:0] FB_PAL_DOUT,
-   input  [23:0] FB_PAL_DIN,
-   output        FB_PAL_WR,
-`endif
-`endif
-
-   output        LED_USER,  // 1 - ON, 0 - OFF.
-
-   // b[1]: 0 - LED status is system status OR'd with b[0]
-   //       1 - LED status is controled solely by b[0]
-   // hint: supply 2'b00 to let the system control the LED.
-   output  [1:0] LED_POWER,
-   output  [1:0] LED_DISK,
-
-   // I/O board button press simulation (active high)
-   // b[1]: user button
-   // b[0]: osd button
-   output  [1:0] BUTTONS,
-
-   input         CLK_AUDIO, // 24.576 MHz
-   output [15:0] AUDIO_L,
-   output [15:0] AUDIO_R,
-   output        AUDIO_S,   // 1 - signed audio samples, 0 - unsigned
-   output  [1:0] AUDIO_MIX, // 0 - no mix, 1 - 25%, 2 - 50%, 3 - 100% (mono)
-
-   //ADC
-   inout   [3:0] ADC_BUS,
-
-   //SD-SPI
-   output        SD_SCK,
-   output        SD_MOSI,
-   input         SD_MISO,
-   output        SD_CS,
-   input         SD_CD,
-
-   //High latency DDR3 RAM interface
-   //Use for non-critical time purposes
-   output        DDRAM_CLK,
-   input         DDRAM_BUSY,
-   output  [7:0] DDRAM_BURSTCNT,
-   output [28:0] DDRAM_ADDR,
-   input  [63:0] DDRAM_DOUT,
-   input         DDRAM_DOUT_READY,
-   output        DDRAM_RD,
-   output [63:0] DDRAM_DIN,
-   output  [7:0] DDRAM_BE,
-   output        DDRAM_WE,
-
-   //SDRAM interface with lower latency
-   output        SDRAM_CLK,
-   output        SDRAM_CKE,
-   output [12:0] SDRAM_A,
-   output  [1:0] SDRAM_BA,
-   inout  [15:0] SDRAM_DQ,
-   output        SDRAM_DQML,
-   output        SDRAM_DQMH,
-   output        SDRAM_nCS,
-   output        SDRAM_nCAS,
-   output        SDRAM_nRAS,
-   output        SDRAM_nWE,
-
-`ifdef MISTER_DUAL_SDRAM
-   //Secondary SDRAM
-   //Set all output SDRAM_* signals to Z ASAP if SDRAM2_EN is 0
-   input         SDRAM2_EN,
-   output        SDRAM2_CLK,
-   output [12:0] SDRAM2_A,
-   output  [1:0] SDRAM2_BA,
-   inout  [15:0] SDRAM2_DQ,
-   output        SDRAM2_nCS,
-   output        SDRAM2_nCAS,
-   output        SDRAM2_nRAS,
-   output        SDRAM2_nWE,
-`endif
-
-   input         UART_CTS,
-   output        UART_RTS,
-   input         UART_RXD,
-   output        UART_TXD,
-   output        UART_DTR,
-   input         UART_DSR,
-
-   // Open-drain User port.
-   // 0 - D+/RX
-   // 1 - D-/TX
-   // 2..6 - USR2..USR6
-   // Set USER_OUT to 1 to read from USER_IN.
-   // [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: USER_OSD, USER_PP, 8-bit USER_IO
-   output        USER_OSD,
-   output  [7:0] USER_PP,
-   input   [7:0] USER_IN,
-   output  [7:0] USER_OUT,
-   // [MiSTer-DB9 END]
-
-   input         OSD_STATUS
+	`include "sys/emu_ports.vh"
 );
-
-// emu bridges the MSX system (rtl/msx_system.sv) to the MiSTer framework:
-// hps_io, PLL and clock enables, video output, SDRAM / DDR3 / SD card / ADC pins.
 
 ///////// Default values for ports not used in this core /////////
 assign {UART_RTS, UART_TXD, UART_DTR} = 0;
@@ -315,12 +156,14 @@ reset_sync rst_sync_sdram (.clk(clk_sdram), .arst(~locked_sdram),          .rst(
 //  [24:23]  OCM slot 2 (internal ESE-SCC / MegaRAM)
 //  [25]     vertical crop
 //  [26]     turbo R firmware switch
+//  [27]     pause when OSD open
 //  [32:29]  slot B cartridge type (not OCM)
 //  [38]     SRAM save
 //  [39]     SRAM load
 //  [40]     tape input (file / ADC)
 //  [41]     border
-// Free: [28:27], [37:33], [127:42]
+//  [42]     tape monitor (0 = on)
+// Free: [28], [37:33], [127:43]
 `include "build_id.v"
 localparam CONF_STR = {
    "MSX1;UART115200,MIDI;",
@@ -362,6 +205,7 @@ localparam CONF_STR = {
    "hCO[26],Firmware switch,Off,On;",
    "H3-;",
    "H3O[40],Tape Input,File,ADC;",
+   "H3O[42],Tape Monitor,On,Off;",
    "HBF5,CAS,Cas File,31700000;",
    "HBT9,Tape Rewind;",
    "-;",
@@ -372,10 +216,12 @@ localparam CONF_STR = {
    "P1O[8:6],Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer,HV-Integer;",
    "P1O[41],Border,No,Yes;",
    "-;",
+   "O[27],Pause when OSD open,No,Yes;",
    // [MiSTer-DB9-Pro BEGIN] - Saturn-first joy_type (canonical bit notation)
    "O[127:126],UserIO Joystick,Off,Saturn,DB9MD,DB15;",
    "O[125],UserIO Players, 1 Player,2 Players;",
    // [MiSTer-DB9-Pro END]
+   //Can be used as initial reset.
    "T[21],Reset;",
    "H3R[10],Reset & Detach ROM Cartridge;",
    "R[21],Reset and close OSD;",
@@ -504,7 +350,6 @@ wire       [5:0] joy[2];
 wire             tape_in;
 wire      [27:0] ddr3_addr;
 wire       [7:0] ddr3_dout;
-wire      [63:0] ddr3_dout64;
 wire             ddr3_rd, ddr3_ready;
 
 assign joy[0] = joy0[5:0];
@@ -531,6 +376,7 @@ msx_system msx_system
    .img_readonly(img_readonly),
    .img_size(img_size),
    .sd_img_mounted(block_device_SD.img_mounted),
+   .osd_status(OSD_STATUS),
    .block_device_FDD(block_device_FDD),
    .msx_config(msx_config),
    .video_bus(video_bus),
@@ -549,7 +395,6 @@ msx_system msx_system
    .ddr3_addr(ddr3_addr),
    .ddr3_rd(ddr3_rd),
    .ddr3_dout(ddr3_dout),
-   .ddr3_dout64(ddr3_dout64),
    .ddr3_ready(ddr3_ready)
 );
 
@@ -585,7 +430,7 @@ always_ff @(posedge clock_bus.clk) begin
     if((old_mosi ^ sdmosi) || (old_miso ^ sdmiso)) timeout <= 0;
 end
 
-// turbo R: R800 on the user LED, pause on the disk LED (VHD / SD activity otherwise)
+// turbo R: R800 on the user LED; machine pause / turbo R pause LED on the disk LED (VHD / SD activity otherwise)
 wire   led_turbo, led_pause;
 assign LED_USER = (vsd_sel & sd_act) | led_turbo;
 assign LED_DISK = {1'b1, (~vsd_sel & sd_act) | led_pause};
@@ -723,7 +568,7 @@ ddram buffer
    .we(),
    .rd(ddr3_rd),
    .ready(ddr3_ready),
-   .dout64(ddr3_dout64)
+   .dout64()
 );
 
 /////////////////   SDRAM   /////////////////

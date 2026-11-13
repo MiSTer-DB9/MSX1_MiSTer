@@ -3,7 +3,7 @@
 **English** | [Česky](Readme.cs.md)
 
 > [!CAUTION]
-> **WIP Notice**: This core is currently in **WIP (Work in Progress)** status. Some components are still under development and may include debug outputs or experimental features. Certain functionalities may not yet work 100% as intended. The ASCII16-X mapper and the MoonSound have been built and tested on real hardware. The NEO-8 and NEO-16 mappers have not been tested on real hardware yet, and V99x8 timing, the R800 and the TC8566AF controller are not verified on hardware either. See [Known limitations](#known-limitations).
+> **WIP Notice**: This core is currently in **WIP (Work in Progress)** status. Some components are still under development and may include debug outputs or experimental features. Certain functionalities may not yet work 100% as intended. See [Known limitations](#known-limitations).
 
 ## Core Overview
 The core (its MiSTer name is still `MSX1`, hence the folder `games/MSX1`) is not a direct synthesis of a specific MSX computer model. Instead, it provides a **dynamically configurable hardware environment** that is built at run time from a selected definition (a *ROM PACK*). Each machine definition includes not only the hardware setup but also the corresponding **ROM binary content.** The core can run:
@@ -52,7 +52,26 @@ How to build the packs and the database:
 
 In short: install **Python 3**, put the ROM binaries into the `ROM` directory of `tools/CreateMSXpack` or pass another folder with `--rom-dir` (files are matched by SHA1, names do not matter), then run `python3 createComp.py` (machines) and `python3 createDev.py` (cartridges); `--help` lists the options. The `.msx` files appear in `MSX/`.
 
-SDRAM: the MoonSound, ASCII16-X, MegaFlashROM and the 1chipMSX (4 MB mapper) need the SDRAM module. Whether small MSX1 configurations run without it, and the required SDRAM size, has not been verified.
+### Without the SDRAM module
+
+The core also runs **without the SDRAM add-on board**, but only for smaller configurations. It has 256 KB of memory inside the FPGA. Everything the machine needs is stored there first: its ROMs, its RAM, then the cartridges in slots A and B. Only what does not fit goes to the SDRAM.
+
+**Works without SDRAM:**
+- **189 of the 224 machines**: almost all MSX1 machines and most MSX2 machines with 64 or 128 KB of RAM (e.g. Philips VG 8020, NMS 8245/8250, VG 8235, Sony HB-F1, HB-F9P).
+- Cartridges, as long as they fit into the rest of the 256 KB. The rest is about **160 KB** on a typical MSX1 (64 KB RAM) and about **64 KB** on a typical MSX2 (128 KB RAM). A cartridge takes the size of its ROM, plus its SRAM or RAM: FM-PAC 72 KB, Game Master 2 136 KB, SCC+ 128 KB.
+
+**Needs SDRAM:**
+- These 35 machines (a Kanji ROM, 256 KB or more of RAM, or large built-in software):
+  - MSX1: National FS-4000, Sony HB-11, Al Alamiah AX230
+  - MSX2: Daewoo CPC-400S, Hitachi MB-H70, Mitsubishi ML-G30 (both models), National FS-4500, FS-4600F, FS-4700F, FS-5000F2, FS-5500F1, FS-5500F2, Panasonic FS-A1F, Al Alamiah AX370, Sony HB-F700D/F/P/S, HB-F900, HB-G900AP, HB-T600, Yamaha AX350II, AX350IIF, AX500, YIS-805/256
+  - MSX2+: Panasonic FS-A1FX, FS-A1WX, FS-A1WSX, Sanyo PHC-35J, PHC-70FD, PHC-70FD2, CIEL Expert Turbo
+  - MSX turbo R: Panasonic FS-A1ST; and the 1chipMSX
+- MoonSound, MegaFlashROM SCC+ SD, ASCII16-X, MegaRAM and MegaSCC.
+- Any ROM cartridge bigger than the free space: most MegaROM games on an MSX2, ROMs of 256 KB and more on any machine.
+
+**What happens when it does not fit:** loading stops with **SMALL MEMORY** in the OSD and the core stays in reset. Load a smaller machine or cartridge, or fit the SDRAM board. The core knows the SDRAM size from the MiSTer menu core, which checks the module at start. If the core is started without the menu (unusual), it does not know the size and does not check. A configuration that does not fit then reads garbage above 256 KB.
+
+With SDRAM, a 32 MB module is enough. The largest machine (1chipMSX) needs about 8 MB, a MoonSound 4 MB, an ASCII16-X 8 MB. Only two ROMs of 16 MB each would not fit (SMALL MEMORY).
 
 ## OSD Features
 
@@ -66,10 +85,12 @@ SDRAM: the MoonSound, ASCII16-X, MegaFlashROM and the 1chipMSX (4 MB mapper) nee
 | Slot1 / Slot2 ROM Load (`.ROM`) | Shown when the slot is set to ROM. Up to 16 MB. |
 | Load SD card (`.VHD`) | 1chipMSX (MegaSD) or MegaFlashROM SCC+ SD in slot 1. |
 | Tape Input | File or ADC (analog input of MiSTer). Not shown on the 1chipMSX. |
+| Tape Monitor | On (default) / Off: the tape signal is heard in the sound output while the motor runs. Not shown on the 1chipMSX. |
 | Cas File (`.CAS`) | Tape image, shown when Tape Input is File. |
 | Tape Rewind | Rewinds the tape image. |
 | Firmware switch | Off / On, only on machines with the S1990 (turbo R). |
 | Video | Aspect ratio, scandoubler (None, HQ2x, CRT 25/50/75 %), Vertical Crop, Scale (Normal, V-Integer, Narrower/Wider HV-Integer, HV-Integer), Border (applies to the TMS and V99xx VDP). |
+| Pause when OSD open | No (default) / Yes: the machine stops while the OSD is open (CPU held, sound muted). |
 | Reset | Reset of the machine. |
 | Reset & Detach ROM Cartridge | Clears the ROM cartridges in both slots and reloads. Not shown on the 1chipMSX. |
 | Reset and close OSD | Reset and leave the menu. |
@@ -78,7 +99,7 @@ SDRAM: the MoonSound, ASCII16-X, MegaFlashROM and the 1chipMSX (4 MB mapper) nee
 1chipMSX has an extra block: CPU speed (Normal / Turbo, F11 toggles), CPU type (Z80 / R800 – only the R800 multiply instructions), Slot1, Slot2, Internal Mapper (2048 / 4096 KB), Joysticks Swap, Mouse Port 1/2, Reset after Mount.
 
 ### OSD error messages
-When a load fails, the OSD info line shows one of these. After **No CRC32 DB**, **Not find CRC32 in DB** and **ROM too big** the core stays in reset until the next load.
+When a load fails, the OSD info line shows one of these. After **No CRC32 DB**, **Not find CRC32 in DB**, **SMALL MEMORY** and **ROM too big** the core stays in reset until the next load.
 
 | Message | Meaning |
 |---|---|
@@ -91,6 +112,7 @@ When a load fails, the OSD info line shows one of these. After **No CRC32 DB**, 
 | No CRC32 DB | A ROM larger than 64 KB needs a mapper but no mapper database is loaded. |
 | Not find CRC32 in DB | A ROM larger than 64 KB is not in the mapper database. |
 | FDC already in machine | Two FDCs in the same position – an error of the machine definition. |
+| SMALL MEMORY | The machine with its cartridges needs more memory than there is: without the SDRAM module more than 256 KB (see [Without the SDRAM module](#without-the-sdram-module)), with a 32 or 64 MB module more than its size. |
 | ROM too big | The ROM file is larger than 16 MB. |
 
 ## Supported Hardware Components
@@ -175,26 +197,28 @@ The 1chipMSX has its own Slot1 (Empty, MegaSCC+ 1MB) and Slot2 (Empty, MegaSCC+ 
 ## MiSTerFPGA Platform Support
 The core integrates with MiSTerFPGA and supports the following features provided by the platform:
 - `Joystick input` – two MSX joystick ports (four directions and two buttons) from the first two MiSTer joysticks; the joystick swap option exists on the 1chipMSX only
-- `Keyboard input` – PS/2 keyboard, per-machine matrix layout (`kbd_layout` in the machine definition, generated by [CreateKeyMap](tools/CreateKeyMap/README.md)); Pause key on the turbo R, F11 = turbo on the 1chipMSX
+- `Keyboard input` – PS/2 keyboard, per-machine matrix layout (`kbd_layout` in the machine definition, generated by [CreateKeyMap](tools/CreateKeyMap/README.md)); Pause key pauses the machine (CPU held, sound muted; on the turbo R the BIOS reads it from port A7h as on the real machine), F11 = turbo on the 1chipMSX
 - `Mouse` – PS/2 mouse as MSX mouse, 1chipMSX only
 - `Cassette` – playback of `.CAS` files (the MSX motor must be on) or real tape through the MiSTer analog input (ADC); the tape is audible. There is no tape output.
 - `MIDI IN` – via the MiSTer UART/MIDI setting, delivered to the YM2148 of the Yamaha machines
 - `Video` – native MSX timing, PAL/NTSC per machine definition (TMS) or software (V99xx), scaling and scandoubler options
-- `LEDs` – SD/VHD activity, turbo R turbo and pause LEDs
-- `SDRAM support` – utilizes external SDRAM for extended memory requirements
+- `LEDs` – SD/VHD activity, pause (machine paused or turbo R pause LED), turbo R turbo LED
+- `SDRAM support` – optional; needed for the bigger machines and cartridges, see [Without the SDRAM module](#without-the-sdram-module)
 
 ## Known Limitations
-- The NEO-8 and NEO-16 mappers are not tested on hardware. V99x8 timing, the R800 and the TC8566AF are not verified on hardware.
 - **Nothing is persistent:** cartridge SRAM (FM-PAC, Game Master 2, KOEI, ASCII with SRAM), flash writes (MegaFlashROM, ASCII16-X) and the RTC CMOS are lost on reload. The **SRAM Save / SRAM Load** items do nothing. The FS-A1ST lacks the 16 KB SRAM of its Panasonic mapper.
 - **Disks:** only raw `.DSK` images (720K, 640K, 360K, 320K); no 40-track, 1.44 MB, XSA, D88, HFE or DMK. WD279x Read Track is partial. The FDC cartridge works only in slot 1 and only in machines without an FDC; there is no TC8566AF cartridge.
 - **Tape:** playback only, no saving; the end of the file is not detected (garbage is played after the last block).
 - **R800:** the turbo R runs at about 2x the Z80 speed instead of the real 4x (R800 timings are not modelled); no turbo R microphone, no FS-A1GT.
 - **ROMs:** a ROM over 64 KB needs an entry in the database, there is no mapper detection from the ROM header. Konami SCC ROM mirrors are not done.
 - **V99x8:** sprites in the overscan and the FH window in text modes are not done. The VDP speed and volume settings of the 1chipMSX are stored without effect.
-- **1chipMSX:** no MoonSound, no special keys (Pause/PrintScreen/ScrollLock).
+- **1chipMSX:** no MoonSound, no special keys PrintScreen/ScrollLock (Pause is the general machine pause).
+- **Pause:** only the CPU stops; a tape (CAS) and the floppy controllers keep running, so a pause during loading can end with a read error.
 - No MIDI OUT, no per-source volume or mute in the OSD, SCC+ deform bits 0/1 missing, no V9990.
 
 ## Acknowledgements
+- [MSX_MiSTer](https://github.com/MiSTer-devel/MSX_MiSTer) by Sorgelig – the MiSTer port of KdL's OCM-PLD and the inspiration for this core. The 1chipMSX machine was converted from it: the IPL ROM, the system I/O ports and CPU speed logic, the ESE-RAM with the MegaSD, the MegaSCC/MegaRAM and the PS/2 mouse.
+- [OCM-PLD](https://github.com/gnogni/ocm-pld-dev) by KdL and the ESE Artists' Factory (Kazuhiro Tsujikawa), with the ESE-VDP by Kunihiko Ohnaka – the origin of the T80 CPU (rewritten to SystemVerilog), the V99x8 VDP, the SCC and the MegaSD/MegaRAM code.
 - [muhanpong/MSX1_MiSTer](https://github.com/muhanpong/MSX1_MiSTer) (branch `nextz80_v9990`) – a fork of this core. Its bug analyses and reports from real hardware pointed out faults in the flash emulation and the pitfalls of the ASCII16-X mapper and the MoonSound. No code was taken from it; the implementations here are independent.
 - [openMSX](https://openmsx.org/) – reference for the behaviour of the ASCII16-X mapper and its flash chip, of the NEO-8 and NEO-16 mappers, of the OPL4 (YMF278B) wave part, bus interface and timers, and of the V99x8 timing.
 - [Grauw](https://www.grauw.nl/projects/ascii-x/ascii16-x/) – specification of the ASCII16-X mapper.

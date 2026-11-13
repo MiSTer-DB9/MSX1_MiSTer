@@ -33,6 +33,7 @@ module user_config
     input                     clk,
     input                     reset,
     input              [63:0] HPS_status,
+    input                     osd_status,       // OSD open (sys osd.v, other clock domain)
     input               [1:0] sdram_size,
     output MSX::config_cart_t cart_conf[2],
     output                    ROM_A_load_hide, //3 
@@ -79,6 +80,7 @@ wire [3:0] slot_B_select   = HPS_status[32:29];
 
 assign msx_user_config.cas_audio_src         = cas_audio_src_t'(HPS_status[40]);
 assign msx_user_config.border                = HPS_status[41];
+assign msx_user_config.tape_monitor          = ~HPS_status[42];   // 0 = On (default)
 assign msx_user_config.joy_swap              = HPS_status[13];
 assign msx_user_config.mouse_port            = HPS_status[14];
 
@@ -88,6 +90,10 @@ assign msx_user_config.mouse_port            = HPS_status[14];
 assign msx_user_config.ocm_dip  = {1'b1, HPS_status[11], HPS_status[24:23], HPS_status[22], 2'b11, HPS_status[15]};
 assign msx_user_config.ocm_r800 = ocmMode && HPS_status[16];
 assign msx_user_config.turbor_firmware = HPS_status[26];
+
+logic [1:0] osd_sync = '0;
+always_ff @(posedge clk) osd_sync <= {osd_sync[0], osd_status};
+assign msx_user_config.osd_pause = HPS_status[27] && osd_sync[1];
 
 assign ROM_A_load_hide    = cart_conf[0].typ != CART_TYP_ROM;
 assign ROM_B_load_hide    = cart_conf[1].typ != CART_TYP_ROM;

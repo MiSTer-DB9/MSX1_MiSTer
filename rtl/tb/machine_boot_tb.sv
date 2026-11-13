@@ -21,6 +21,10 @@
 // Pause key (hps_io event 377h) at that time and checks that the BIOS lights the pause LED (A7h
 // bit 0) and turns it off after a second press 500 ms later. The FS-A1ST BIOS pauses BASIC in
 // software (A7h = 81h); when it enables the hardware pause (bit 1) the CPU must stop as well.
+// Other machines: +pause_ms=<ms> the Pause key pauses the machine (CPU stopped, sound muted,
+// pause LED), the second press 500 ms later resumes it.
+// +osd_ms=<ms>: the OSD opens at that time with "Pause when OSD open" off (the machine runs),
+// 200 ms later the option goes on (paused), 400 ms later the OSD closes (runs again).
 // Run: wsl.exe -- bash rtl/tb/run_machine_boot.sh <machine.msx> <image.dsk> [expected text]
 module machine_boot_tb;
 
@@ -51,10 +55,11 @@ wire    [7:0] info;
 MSX::msx_config_t msx_config;
 MSX::video_t  video_bus;
 wire   [15:0] audio_L, audio_R;
+wire          led_pause;
+logic         osd_status = 0;
 wire   [27:0] ddr3_addr;
 wire          ddr3_rd, ddr3_ready;
 wire    [7:0] ddr3_dout;
-wire   [63:0] ddr3_dout64;
 
 block_device_if block_device_FDD[2*MSX::N_FDC]();
 block_device_if block_device_SD();
@@ -72,10 +77,11 @@ msx_system sys (
     .img_readonly(1'b0), .img_size(64'd0), .sd_img_mounted(1'b0),
     .block_device_FDD(block_device_FDD), .msx_config(msx_config),
     .video_bus(video_bus), .audio_L(audio_L), .audio_R(audio_R), .uart_rxd(1'b1), .tape_adc(1'b0),
+    .led_pause(led_pause), .osd_status(osd_status),
     .ext_SD_card_bus(ext_SD_card_bus),
     .memory_bus_sdram_ch1(sd_ch1), .memory_bus_sdram_ch2(sd_ch2), .memory_bus_sdram_ch3(sd_ch3),
     .wave_bus_sdram_ch4(sd_ch4), .cpu_phase(cpu_phase),
-    .ddr3_addr(ddr3_addr), .ddr3_rd(ddr3_rd), .ddr3_dout(ddr3_dout), .ddr3_dout64(ddr3_dout64),
+    .ddr3_addr(ddr3_addr), .ddr3_rd(ddr3_rd), .ddr3_dout(ddr3_dout),
     .ddr3_ready(ddr3_ready)
 );
 assign ext_SD_card_bus.data_from_SD = 8'hFF;  assign ext_SD_card_bus.busy = 1'b0;
@@ -91,7 +97,7 @@ ddram ddr (
     .DDRAM_ADDR(DDRAM_ADDR), .DDRAM_DOUT(DDRAM_DOUT), .DDRAM_DOUT_READY(DDRAM_DOUT_READY),
     .DDRAM_RD(DDRAM_RD), .DDRAM_DIN(DDRAM_DIN), .DDRAM_BE(DDRAM_BE), .DDRAM_WE(DDRAM_WE),
     .addr(ddr3_addr), .dout(ddr3_dout), .din(8'h00), .we(1'b0), .rd(ddr3_rd), .ready(ddr3_ready),
-    .dout64(ddr3_dout64)
+    .dout64()
 );
 
 logic [28:0] ddr_rd_addr;
@@ -178,9 +184,12 @@ always @(posedge clk_core) begin
     end
 end
 
-// sound output: range, and every 487th clk into a file (44.1 kHz)
+// sound output: range, and every 487th clk into a file (44.1 kHz); pause window: clk with sound
 int audio_fd = 0, audio_min = 0, audio_lo = 0, audio_hi = 0, audio_div = 0;
+bit pause_window = 0;
+int pause_sound = 0;
 always @(posedge clk_core) if (!reset) begin
+    if (pause_window && (audio_L != 0 || audio_R != 0)) pause_sound++;
     if ($signed(audio_L) < audio_lo) audio_lo = $signed(audio_L);
     if ($signed(audio_L) > audio_hi) audio_hi = $signed(audio_L);
     audio_div <= audio_div == 486 ? 0 : audio_div + 1;
@@ -464,14 +473,30 @@ function automatic bit contains(input string s, input string k);
     return 0;
 endfunction
 
+// ------------------------------------------------------------------ machine pause (key / OSD)
+// m1_from: M1 count at the start of the window
+task automatic check_paused(input string what, input int m1_from, inout int errors);
+    if (m1_all != m1_from)           begin errors++; $display("FAIL %s: CPU runs in the pause (%0d M1)", what, m1_all - m1_from); end
+    if (!led_pause)                  begin errors++; $display("FAIL %s: pause LED off", what); end
+    if (!sys.MSX.devices.sound_mix.mute) begin errors++; $display("FAIL %s: sound not muted", what); end
+    if (pause_sound != 0)            begin errors++; $display("FAIL %s: sound output in the pause (%0d clk)", what, pause_sound); end
+    $display("%0t %s: paused, %0d M1, %0d clk with sound", $time, what, m1_all - m1_from, pause_sound);
+endtask
+task automatic check_running(input string what, input int m1_from, inout int errors);
+    if (m1_all == m1_from)           begin errors++; $display("FAIL %s: CPU does not run", what); end
+    if (led_pause)                   begin errors++; $display("FAIL %s: pause LED on", what); end
+    if (sys.MSX.devices.sound_mix.mute) begin errors++; $display("FAIL %s: sound muted", what); end
+    $display("%0t %s: runs, %0d M1", $time, what, m1_all - m1_from);
+endtask
+
 // ------------------------------------------------------------------ run
 initial begin
     string pack_name, dsk_name, expect_txt = "", last = "", now, dump, fname;
     int frame_ms = 0;
     int fd, c, errors = 0, run_ms = 15000, found_ms = -1, key_ms = 8000, pause_ms = -1, fw = 0, m1_paused = 0;
-    int slota = 0, slotb = 0, want_err = 0;
+    int slota = 0, slotb = 0, want_err = 0, osd_ms = -1;
     logic [8:0] key = '0;
-    bit         use_key, no_disk, tc_used;
+    bit         use_key, no_disk, tc_used, turbor_pause;
 
     if (!$value$plusargs("pack=%s", pack_name) || !$value$plusargs("dsk=%s", dsk_name)) begin
         $display("usage: +pack=<machine.msx> +dsk=<image.dsk> [+expect=<text>] [+run_ms=<ms>]"); $finish;
@@ -481,6 +506,7 @@ initial begin
     void'($value$plusargs("key_ms=%d", key_ms));
     use_key = $value$plusargs("key=%h", key);
     void'($value$plusargs("pause_ms=%d", pause_ms));
+    void'($value$plusargs("osd_ms=%d", osd_ms));
     if ($value$plusargs("firmware=%d", fw)) status[26] = fw[0];
     if ($value$plusargs("slota=%d", slota)) status[20:17] = 4'(slota);
     if ($value$plusargs("slotb=%d", slotb)) status[32:29] = 4'(slotb);
@@ -512,26 +538,26 @@ initial begin
     if (fwpk.size() > 0) begin
         ioctl_index = 16'd2; ioctl_download = 1;
         @(posedge clk_core); ioctl_addr = 27'(fwpk.size());
-        @(posedge clk_core); ioctl_download = 0;
+        @(posedge clk_core); ioctl_download = 0; ioctl_addr = ioctl_addr + 1'd1;   // hps_io: +1 at the end
         wait (sys.upload); wait (!sys.upload);
         repeat (10) @(posedge clk_core);
     end
     if (db.size() > 0) begin
         ioctl_index = 16'd6; ioctl_download = 1;
         @(posedge clk_core); ioctl_addr = 27'(db.size());
-        @(posedge clk_core); ioctl_download = 0;
+        @(posedge clk_core); ioctl_download = 0; ioctl_addr = ioctl_addr + 1'd1;   // hps_io: +1 at the end
         repeat (10) @(posedge clk_core);
     end
     ioctl_index = 16'd1; ioctl_download = 1;
     @(posedge clk_core); ioctl_addr = 27'(pack.size());
-    @(posedge clk_core); ioctl_download = 0;
+    @(posedge clk_core); ioctl_download = 0; ioctl_addr = ioctl_addr + 1'd1;   // hps_io: +1 at the end
     wait (sys.upload);
     wait (!sys.upload);
     if (rom.size() > 0) begin
         repeat (10) @(posedge clk_core);
         ioctl_index = 16'd3; ioctl_download = 1;
         @(posedge clk_core); ioctl_addr = 27'(rom.size());
-        @(posedge clk_core); ioctl_download = 0;
+        @(posedge clk_core); ioctl_download = 0; ioctl_addr = ioctl_addr + 1'd1;   // hps_io: +1 at the end
         wait (sys.upload); wait (!sys.upload);
     end
     $display("%0t pack loaded, error=%0d, msx_config.fdd=%b", $time, sys.error, msx_config.fdd);
@@ -540,6 +566,7 @@ initial begin
         else                             $display("FAILED machine_boot_tb: pack error %0d, expected %0d", sys.error, want_err);
         $finish;
     end else if (sys.error != ERR_NONE) begin $display("FAILED machine_boot_tb: pack error"); $finish; end
+    turbor_pause = sys.io_device[DEV_TURBOR_PAUSE][0].enable;
     if (!no_disk && !msx_config.fdd[VD - 1]) begin errors++; $display("FAIL msx_config.fdd[%0d] = 0: VD %0d not enabled", VD - 1, VD); end
 
     // key down once the keyboard map of the pack is loaded
@@ -567,8 +594,27 @@ initial begin
             ps2_key = {~ps2_key[10], 10'h377};
             $display("%0t %0d ms: Pause key, A7 = %02h", $time, ms, sys.MSX.devices.dev_turbor_pause.status);
         end
-        if (pause_ms >= 0 && ms == pause_ms + 100) m1_paused = m1_all;
-        if (pause_ms >= 0 && ms == pause_ms + 400) begin
+        if (pause_ms >= 0 && !turbor_pause) begin
+            // machine without A7h: the Pause key pauses the whole machine
+            if (ms == pause_ms + 100) begin m1_paused = m1_all; pause_sound = 0; pause_window = 1; end
+            if (ms == pause_ms + 400) begin
+                pause_window = 0;
+                check_paused("Pause key", m1_paused, errors);
+                m1_paused = m1_all;
+            end
+            if (ms == pause_ms + 800) check_running("second Pause key", m1_paused, errors);
+        end
+        if (osd_ms >= 0) begin
+            if (ms == osd_ms) begin osd_status = 1; m1_paused = m1_all; $display("%0t %0d ms: OSD open, pause option off", $time, ms); end
+            if (ms == osd_ms + 100) check_running("OSD open, option off", m1_paused, errors);
+            if (ms == osd_ms + 200) begin status[27] = 1; $display("%0t %0d ms: pause option on", $time, ms); end
+            if (ms == osd_ms + 300) begin m1_paused = m1_all; pause_sound = 0; pause_window = 1; end
+            if (ms == osd_ms + 500) begin pause_window = 0; check_paused("OSD open, option on", m1_paused, errors); end
+            if (ms == osd_ms + 600) begin osd_status = 0; m1_paused = m1_all; $display("%0t %0d ms: OSD closed", $time, ms); end
+            if (ms == osd_ms + 800) check_running("OSD closed", m1_paused, errors);
+        end
+        if (pause_ms >= 0 && turbor_pause && ms == pause_ms + 100) m1_paused = m1_all;
+        if (pause_ms >= 0 && turbor_pause && ms == pause_ms + 400) begin
             if (!sys.MSX.devices.dev_turbor_pause.paused) begin errors++; $display("FAIL the Pause key did not set the pause"); end
             if (!sys.MSX.devices.dev_turbor_pause.pause_led) begin errors++; $display("FAIL pause LED off after the Pause key (A7 = %02h)", sys.MSX.devices.dev_turbor_pause.status); end
             if (sys.MSX.devices.dev_turbor_pause.status[1]) begin
@@ -580,7 +626,7 @@ initial begin
                          sys.MSX.devices.dev_turbor_pause.status, m1_all - m1_paused);
             m1_paused = m1_all;
         end
-        if (pause_ms >= 0 && ms == pause_ms + 800) begin
+        if (pause_ms >= 0 && turbor_pause && ms == pause_ms + 800) begin
             if (sys.MSX.devices.dev_turbor_pause.paused) begin errors++; $display("FAIL still paused after the second Pause key"); end
             if (sys.MSX.devices.dev_turbor_pause.pause_led) begin errors++; $display("FAIL pause LED on after the second Pause key (A7 = %02h)", sys.MSX.devices.dev_turbor_pause.status); end
             if (m1_all == m1_paused) begin errors++; $display("FAIL CPU does not run after the pause"); end

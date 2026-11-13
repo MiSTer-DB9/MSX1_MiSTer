@@ -467,11 +467,13 @@ package MSX;
     typedef struct {
         logic           border;
         cas_audio_src_t cas_audio_src;
+        logic           tape_monitor;   // tape signal in the sound output while the motor runs
         logic     [7:0] ocm_dip;
         logic           joy_swap;       // OCM: swap joystick ports
         logic           mouse_port;     // OCM: PS/2 mouse on port 1 (0) / 2 (1)
         logic           ocm_r800;       // OCM: CPU type R800 (MULUB / MULUW)
         logic           turbor_firmware; // turbo R: firmware switch on (S1990 register 5)
+        logic           osd_pause;      // OSD open and "Pause when OSD open" on
     } user_config_t;    
     
     typedef struct {
@@ -562,6 +564,9 @@ package MSX;
     localparam logic [27:0] DDR3_ROM_A    = 28'h2000000;   // 16 MB
     localparam logic [27:0] DDR3_ROM_B    = 28'h3000000;   // 16 MB
     localparam logic [26:0] ROM_MAX       = 27'h1000000;   // larger ROM: ERR_ROM_TOO_BIG
+
+    // System memory below 2^BRAM_WIDTH is BRAM in the FPGA, the rest SDRAM (system_memory).
+    localparam int BRAM_WIDTH = 18;
 
     // ---------------------------------------------------------------- synthesized copies
     // The one place to set how many copies of a device are built (io_device keeps 3 slots
