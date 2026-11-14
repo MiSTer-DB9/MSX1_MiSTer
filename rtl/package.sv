@@ -19,8 +19,8 @@ typedef enum logic [3:0] {DEVICE_NONE, DEVICE_ROM } device_typ_t;
 typedef enum logic {CAS_AUDIO_FILE,CAS_AUDIO_ADC} cas_audio_src_t;
 typedef enum logic [1:0] {Z80, R800, UNKN1, UNKN2} cpu_t;
 
-typedef enum logic [3:0] {CART_TYP_SCC, CART_TYP_SCC2, CART_TYP_FM_PAC, CART_TYP_MFRSD, CART_TYP_GM2, CART_TYP_FDC, CART_MEGASCC1, CART_MEGASCC2, CART_MEGA_ASCII_8, CART_MEGA_ASCII_16, MEGARAM, CART_TYP_ROM, CART_TYP_EMPTY, CART_TYP_MOONSOUND } cart_typ_t;
-typedef enum logic [4:0] {DEV_NONE, DEV_OPLL, DEV_SCC, DEV_WD2793, DEV_MSX2_RAM, DEV_LATCH_PORT, DEV_KANJI, DEV_OCM_BOOT, DEV_VDP_TMS, DEV_VDP_V99xx, DEV_RTC, DEV_PSG, DEV_PPI, DEV_RESET_STATUS, DEV_TC8566AF, DEV_OPM, DEV_YM2148, DEV_DAC, DEV_SYSTIMER, DEV_S1990, DEV_TURBOR_PCM, DEV_TURBOR_PAUSE, DEV_OPL4 } device_t;
+typedef enum logic [3:0] {CART_TYP_SCC, CART_TYP_SCC2, CART_TYP_FM_PAC, CART_TYP_MFRSD, CART_TYP_GM2, CART_TYP_FDC, CART_MEGASCC1, CART_MEGASCC2, CART_MEGA_ASCII_8, CART_MEGA_ASCII_16, CART_TYP_UNUSED10, CART_TYP_ROM, CART_TYP_EMPTY, CART_TYP_MOONSOUND, CART_TYP_MSX_MIDI } cart_typ_t;
+typedef enum logic [4:0] {DEV_NONE, DEV_OPLL, DEV_SCC, DEV_WD2793, DEV_MSX2_RAM, DEV_LATCH_PORT, DEV_KANJI, DEV_OCM_BOOT, DEV_VDP_TMS, DEV_VDP_V99xx, DEV_RTC, DEV_PSG, DEV_PPI, DEV_RESET_STATUS, DEV_TC8566AF, DEV_OPM, DEV_YM2148, DEV_DAC, DEV_SYSTIMER, DEV_S1990, DEV_TURBOR_PCM, DEV_TURBOR_PAUSE, DEV_OPL4, DEV_MSX_MIDI, DEV_MATSUSHITA, DEV_CIEL_TURBO } device_t;
 typedef enum logic [5:0] {MAPPER_NONE, MAPPER_OFFSET, MAPPER_ASCII16, MAPPER_RTYPE, MAPPER_ASCII8, MAPPER_KOEI, MAPPER_WIZARDY, MAPPER_KONAMI, 
                           MAPPER_FMPAC, MAPPER_GM2, VY0010, MAPPER_KONAMI_SCC, MAPPER_MSX2, MAPPER_GENERIC16KB, MAPPER_CROSS_BLAIM, MAPPER_GENERIC8KB, 
                           MAPPER_HARRY_FOX, MAPPER_ZEMINA_80, MAPPER_ZEMINA_90, MAPPER_KONAMI_SCC_PLUS, 
@@ -40,22 +40,6 @@ typedef enum logic [5:0] {MAPPER_NONE, MAPPER_OFFSET, MAPPER_ASCII16, MAPPER_RTY
 typedef enum logic [3:0] {BLOCK_RAM, BLOCK_ROM, BLOCK_SRAM, BLOCK_DEVICE, BLOCK_MAPPER, BLOCK_CART, BLOCK_REF_MEM, BLOCK_REF_DEV, BLOCK_IO_DEVICE, BLOCK_EXPANDER, BLOCK_REF_SHARED_MEM, BLOCK_FLASH} block_t;
 typedef enum logic [2:0] {CONF_BLOCK, CONF_DEVICE, CONF_LAYOUT, CONF_CARTRIGE, CONF_BLOCK_FW, CONF_UNUSED5, CONF_UNUSED6, CONF_END} conf_t;
 typedef enum logic [3:0] {ERR_NONE, ERR_BAD_MSX_CONF, ERR_NOT_SUPPORTED_CONF, ERR_NOT_SUPPORTED_BLOCK, ERR_BAD_MSX_FW_CONF, ERR_NOT_FW_CONF, ERR_DEVICE_MISSING, ERR_MISSING_SOURCE, ERR_NO_CRC_DB, ERR_NO_CRC_FOUND, ERR_NO_MEMORY, ERR_FDC_PRESENT, ERR_ROM_TOO_BIG} error_t;
-
-interface cpu_regs_if();
-    wire [15:0] AF;
-    wire [15:0] BC;
-    wire [15:0] DE;
-    wire [15:0] HL;
-    wire [15:0] AF2;
-    wire [15:0] BC2;
-    wire [15:0] DE2;
-    wire [15:0] HL2;
-    wire [15:0] IX;
-    wire [15:0] IY;
-    wire [15:0] PC;
-    wire [15:0] SP;
-    wire change;
-endinterface
 
 interface clock_bus_if(
     input     clk,
@@ -379,20 +363,6 @@ interface wave_bus_if;
     );
 endinterface
 
-interface sd_bus;
-   logic          ack;
-   logic   [13:0] buff_addr;
-   logic    [7:0] buff_data;
-   logic          buff_wr;
-endinterface
-
-interface sd_bus_control;
-   logic         rd;
-   logic         wr;
-   logic  [31:0] sd_lba;
-   logic   [7:0] buff_data;
-endinterface
-
 package MSX;
 
     // One-directional bundles (driver -> readers) between slots, mappers and devices.
@@ -434,10 +404,12 @@ package MSX;
 
     typedef struct packed {
         logic        en;        // 1 = overrides the static speed from msx_config
-        logic  [1:0] clock_sel; // msx_cpu encoding: 00 3.58, 01 10.7, 10 5.39 MHz
+        logic  [1:0] clock_sel; // msx_cpu encoding: 00 3.58, 01 10.7, 10 5.37, 11 7.16 MHz
         logic  [3:0] mem_wait;  // wait states on each memory access
         logic  [3:0] io_wait;   // extra wait states on each I/O access
-    } cpu_speed_t;             // devices (OCM turbo) -> msx_cpu; '0 = no override
+        logic        vdp_wr_hold; // Matsushita with turbo: VDP writes are timed
+        logic        vdp_wr_wait; // Matsushita turbo on: VDP writes keep the gap
+    } cpu_speed_t;             // devices (OCM / Matsushita / CIEL turbo) -> msx_cpu; '0 = no override
 
     // Inactive (neutral) values and pairwise merge of the bundles above.
     localparam mapper_out_t MAPPER_OUT_IDLE = {27'h7FFFFFF, 1'b1, 1'b0, 1'b0, 1'b0, 8'hFF};
@@ -467,11 +439,13 @@ package MSX;
     typedef struct {
         logic           border;
         cas_audio_src_t cas_audio_src;
+        logic           tape_monitor;   // tape signal in the sound output while the motor runs
         logic     [7:0] ocm_dip;
         logic           joy_swap;       // OCM: swap joystick ports
         logic           mouse_port;     // OCM: PS/2 mouse on port 1 (0) / 2 (1)
         logic           ocm_r800;       // OCM: CPU type R800 (MULUB / MULUW)
-        logic           turbor_firmware; // turbo R: firmware switch on (S1990 register 5)
+        logic           firmware_sw;    // firmware switch on (turbo R S1990 register 5, Matsushita 41h)
+        logic           osd_pause;      // OSD open and "Pause when OSD open" on
     } user_config_t;    
     
     typedef struct {
@@ -546,6 +520,8 @@ package MSX;
         cpu_t cpu;
         logic [2:0] wait_count;
         logic [2:0] cpu_clock_sel;
+        logic       cmos_z80;       // CMOS Z80 inside a Toshiba MSX-Engine (T7775, T7937, T9763, T9769)
+        logic       vdp_io_wait;    // T9769: one more wait state on the VDP ports
         logic [5:0] fdd;        // drives shown in the OSD, a bit pair per FDC position (2*N_FDC used)
     } msx_config_t;
 
@@ -555,13 +531,16 @@ package MSX;
     // DDR3 areas of the OSD files, offset from 0x30000000 (ddram.sv). The HPS writes a file
     // whole at its address: the load addresses in CONF_STR (MSX1.sv) must be these.
     // Map and sizes: doc/konfigurace.md "Oblasti v DDR3".
-    localparam logic [27:0] DDR3_ROM_PACK = 28'h0000000;   //  3 MB
-    localparam logic [27:0] DDR3_FW_PACK  = 28'h0300000;   // 19 MB
+    localparam logic [27:0] DDR3_ROM_PACK = 28'h0000000;   //  8 MB  (FS-A1GT 4.5 MB)
+    localparam logic [27:0] DDR3_FW_PACK  = 28'h0800000;   // 14 MB
     localparam logic [27:0] DDR3_DB       = 28'h1600000;   //  1 MB  mapper database (CRC32)
     localparam logic [27:0] DDR3_CAS      = 28'h1700000;   //  9 MB
     localparam logic [27:0] DDR3_ROM_A    = 28'h2000000;   // 16 MB
     localparam logic [27:0] DDR3_ROM_B    = 28'h3000000;   // 16 MB
     localparam logic [26:0] ROM_MAX       = 27'h1000000;   // larger ROM: ERR_ROM_TOO_BIG
+
+    // System memory below 2^BRAM_WIDTH is BRAM in the FPGA, the rest SDRAM (system_memory).
+    localparam int BRAM_WIDTH = 18;
 
     // ---------------------------------------------------------------- synthesized copies
     // The one place to set how many copies of a device are built (io_device keeps 3 slots

@@ -69,12 +69,22 @@ wire [191:0] obs_old = {main_old, mem_old.addr, mem_old.rnw, mem_old.ram_cs, mem
                         sd_old.rx, sd_old.tx, sd_old.data_to_SD};
 
 int errors = 0, compared = 0, hold = 0;
+logic [191:0] obs_mask;
+mapper_typ_t  typ_q = MAPPER_NONE;     // block type of the previous clock (registered SD outputs)
+always @(posedge clk) typ_q <= block_info.typ;
 int active[64];          // cycles with ram_cs/sram_cs/device en, per mapper type
 
 int err_typ[int];                   // mismatches per mapper type (summary at the end)
 task automatic check(string phase);
     compared++;
-    if (obs_new !== obs_old) begin
+    // MFRSD SD requests wait for the SPI and set rx on writes too (mfrsd_sd_tb, C10): the
+    // SD signals are not compared while an MFRSD block is or was just active
+    if (block_info.typ == MAPPER_MFRSD3 || typ_q == MAPPER_MFRSD3) begin
+        obs_mask = {192{1'b1}};
+        obs_mask[9:0] = '0;                         // sd rx, tx, data_to_SD
+    end else
+        obs_mask = {192{1'b1}};
+    if ((obs_new & obs_mask) !== (obs_old & obs_mask)) begin
         errors++;
         err_typ[int'(block_info.typ)]++;
         if (errors <= 10 || err_typ[int'(block_info.typ)] == 1)
@@ -107,6 +117,41 @@ initial begin
             block_info.device_ref = 3'($urandom);
             block_info.id         = 1'($urandom);
             block_info.mapper_param  = 2'($urandom);    // turbo R fields: other mappers ignore them
+            // OFFSET: bit 0 = memory in the upper 8 kB of the page (offset_tb), not in the reference
+            if (block_info.typ == MAPPER_OFFSET) block_info.mapper_param[0] = 1'b0;
+            // KONAMI_SCC: a bank past the ROM end wraps (konami_scc_tb); from 2 MB none does
+            if (block_info.typ == MAPPER_KONAMI_SCC) block_info.rom_size[24] = 1'b1;
+            if (block_info.typ == MAPPER_KONAMI)     block_info.rom_size[24] = 1'b1;   // konami_tb
+            // ASCII16 family (ascii16_tb): below 4 MB in whole 16 KB blocks the block count is the
+            // same as in the reference; R-Type differs by design and is not compared
+            if (block_info.typ == MAPPER_RTYPE) block_info.typ = MAPPER_ASCII16;
+            // GM2 (gm2_tb): registers per slot, pages 0/3 unmapped, SRAM write half: compare one
+            // slot, pages 1-2, SRAM selected through A000 only
+            if (block_info.typ == MAPPER_GM2) block_info.id = 1'b0;
+            // Generic 8 / 16 KB (generic_tb): one fixed size where the reference block count is right
+            // and the reset banks are inside the ROM. The bank wraps when read, the reference when
+            // written, so the size must not change between the two.
+            if (block_info.typ == MAPPER_GENERIC8KB)  block_info.rom_size = 25'h0180000;   // 1.5 MB
+            if (block_info.typ == MAPPER_GENERIC16KB) block_info.rom_size = 25'h0300000;   // 3 MB
+            if (block_info.typ == MAPPER_ZEMINA_80)   block_info.rom_size = 25'h0100000;   // 1 MB, zemina80_tb
+            if (block_info.typ == MAPPER_ZEMINA_90)   block_info.rom_size = 25'h0100000;   // 1 MB, zemina90_tb
+            // Mirror (mirror_tb): the reference used (page + 2 x offset) % blocks, equal only for
+            // offset 0 and 8 / 16 / 32 KB
+            if (block_info.typ == MAPPER_MIRROR) begin
+                block_info.offset_ram     = 2'd0;
+                block_info.rom_size[15:0] = 16'h2000 << $urandom_range(2);
+            end
+            if (block_info.typ == MAPPER_ASCII16 || block_info.typ == MAPPER_MSXWRITE || block_info.typ == MAPPER_SUPERSWANGI) begin
+                block_info.rom_size[24:22] = '0;
+                block_info.rom_size[13:0]  = '0;
+            end
+            // ASCII8 / KOEI / WIZARDRY (ascii8_tb): no wrap, no SRAM enable bit from the ROM size,
+            // SRAM of 8 KB or more (no mirror)
+            if (block_info.typ == MAPPER_ASCII8 || block_info.typ == MAPPER_KOEI || block_info.typ == MAPPER_WIZARDY) begin
+                block_info.rom_size[24]    = 1'b1;
+                block_info.rom_size[20:13] = '0;
+                block_info.sram_size[3]    = 1'b1;
+            end
             block_info.main_ram_size = 17'($urandom);
             block_info.dram          = 1'($urandom);
             megaSD_en             = 1'($urandom);
@@ -116,8 +161,26 @@ initial begin
         end
         hold--;
         addr           = 16'($urandom);
+        // ESE_RAM maps 0x4000-0xBFFF only (eseram_tb); the reference mirrored pages 0 and 3
+        if (block_info.typ == MAPPER_ESE_RAM) addr[15] = ~addr[14];
+        // KONAMI_SCC mirrors pages 1-2 in pages 3 and 0 (konami_scc_tb); the reference did not
+        if (block_info.typ == MAPPER_KONAMI_SCC) addr[15] = ~addr[14];
+        if (block_info.typ == MAPPER_KONAMI)     addr[15] = ~addr[14];      // mirrors: konami_tb
+        if (block_info.typ == MAPPER_GM2)        addr[15] = ~addr[14];
+        // FM-PAC (fm_pac_tb): window 4000-7FFF only, register reads alone, FF beside the SRAM:
+        // compare in the window, without 7FF6 / 7FF7
+        if (block_info.typ == MAPPER_FMPAC) begin
+            addr[15:14] = 2'b01;
+            if (addr[13:1] == 13'h1FFB) addr[13] = 1'b0;
+        end
         cpu_data       = 8'($urandom);
+        // WIZARDRY: SRAM bit only for the writable regions (shown read-only elsewhere: ascii8_tb)
+        if (block_info.typ == MAPPER_WIZARDY && addr[15:12] == 4'h6) cpu_data[7] = 1'b0;
+        if (block_info.typ == MAPPER_GM2 && (addr[15:12] == 4'h6 || addr[15:12] == 4'h8)) cpu_data[4] = 1'b0;
+        if (block_info.typ == MAPPER_FMPAC && addr[13:0] == 14'h1FFE && cpu_data == 8'h4D) cpu_data = 8'h4C;   // no SRAM
         data_to_mapper = 8'($urandom);
+        // Zemina 90 mode 80h is fixed (zemina90_tb), the reference had it wrong
+        if (block_info.typ == MAPPER_ZEMINA_90 && data_to_mapper[7:6] == 2'b10) data_to_mapper[6] = 1'b1;
         flash_q        = 8'($urandom);
         sd_q           = 8'($urandom);
         flash_valid    = ($urandom_range(3) == 0);

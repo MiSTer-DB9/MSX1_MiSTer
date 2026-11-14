@@ -29,7 +29,7 @@ CreateCRC: vampier.db (CRC32 -> FW ID)                                          
 | `block.json` | `block_t` | block types 0-11 |
 | `device.json` | `device_t` (5 bit) | device names 0-22 (MEM_MAPPER = `DEV_MSX2_RAM`, TMS99xx = `DEV_VDP_TMS`, V99xx = `DEV_VDP_V99xx`) |
 | `mapper.json` | `mapper_typ_t` (6 bit) | mapper names 0-40 (the spellings `GENRIC_16KB`/`GENRIC_8KB` are as in the RTL) |
-| `cart_device.json` | `cart_typ_t` | FW IDs: 0-13 menu cartridges, 20-57 ROM mappers selected by the DB |
+| `cart_device.json` | `cart_typ_t` | FW IDs: 0-13 menu cartridges, 20-59 ROM mappers selected by the DB |
 | `deviceParams.json` | `io_device.param` use of each device module | named device parameters, see section 2.6 |
 
 Run all tools from inside `tools/CreateMSXpack`: the JSON tables and `ROM` (unless `--rom-dir`), `Extension`, `MSX` are opened by relative name (`createDev.py` also uses a temporary `ROM.bin` in the current directory).
@@ -44,7 +44,8 @@ Root element `<msxConfig>`. Numbers can be decimal or `0x` hex (machine XML only
 |---|---|---|
 | `<cpu>` | `Z80` or `R800` | header bits 7:6. Turbo R machines still declare `Z80`; the R800 is switched at run time by the S1990 device |
 | `<wait_count>` | 0-7 | M1 wait states (header bits 5:3). All machines use `1` |
-| `<cpu_frequency>` | 0, 1, 2 | 0 = 3.58, 1 = 5.39, 2 = 10.7 MHz. All machines use `0` |
+| `<cpu_frequency>` | 0, 1, 2, 3 | Z80 clock after reset: 0 = 3.58, 1 = 5.37, 2 = 10.7, 3 = 7.16 MHz. All machines use `0`; a turbo is switched at run time by a device (`MATSUSHITA`, `CIEL_TURBO`, `OCM_BOOT`, `S1990`) |
+| `<engine>` | `S3527`, `S1985`, `T7775`, `T7937`, `T9763`, `T9769` | MSX-Engine of the machine (optional, attribute `subtype` is informational), header byte 4. The Toshiba engines contain a CMOS Z80: `OUT (C),0` writes FFh and SCF / CCF keep the Y flag (bit 0). `T9769` also adds one wait state to every access to the VDP ports 98h-9Bh (bit 1). The Yamaha engines change nothing. An unknown name stops the machine |
 | `<device>` | device name | top-level I/O device, see 2.2 |
 | `<kbd_layout>` | base64 | 512-byte key map from [../CreateKeyMap/README.md](../CreateKeyMap/README.md), becomes the KEYBOARD_LAYOUT record. Every current machine embeds `key_map_eu.bin` |
 | `<primary slot="0..3">` | slot tree | primary slot, see 2.3 |
@@ -58,9 +59,9 @@ The element text is a name from `device.json`; an unknown name prints `Device '<
 | Attribute | Meaning |
 |---|---|
 | `port`, `mask` | 8 bit each. The device decodes an access when `(addr & mask) == port` |
-| named parameters | encoded through `deviceParams.json` (section 2.6): `MODE` (TMS99xx: PAL/NTSC), `VDP_ID` (V99xx: V9938/V9958), `system` (PSG: true = the machine PSG with the joystick/keyboard ports), `OCM` (PPI), `inverted` (RESET_STATUS) |
+| named parameters | encoded through `deviceParams.json` (section 2.6): `MODE` (TMS99xx: PAL/NTSC), `VDP_ID` (V99xx: V9938/V9958), `system` (PSG: true = the machine PSG with the joystick/keyboard ports), `OCM` (PPI), `inverted` (RESET_STATUS), `turbo` and `sram` (MATSUSHITA: the 5.37 MHz turbo switch and the 2 kB SRAM are present) |
 | `param` | raw 8-bit parameter for devices **without** an entry in `deviceParams.json` (for example KANJI: bit 0 = hangul, bit 1 = lascom) |
-| `ROM_SHA1`, `rom_skip`, `rom_size` | the device's own ROM, appended to the record (KANJI font). If the ROM is missing the whole machine is skipped and its `.msx` is deleted |
+| `ROM_SHA1`, `rom_skip`, `rom_size` | the device's own ROM, appended to the record (KANJI font) |
 | `shared_slot`, `shared_subslot`, `shared_block`, `shared_size` (all required together), `shared_offset` (default 0) | the device memory is a window into an existing block (1chipMSX KANJI uses the ESE-RAM block) |
 
 Top-level devices without `shared_slot` are written first, devices with `shared_slot` after the slot tree. A device with `shared_slot` must therefore only reference blocks created by the slot tree.
@@ -78,7 +79,7 @@ Top-level devices without `shared_slot` are written first, devices with `shared_
 - A non-expanded slot has either `<block>` directly under `<primary>` or one `<secondary slot="0">`. Both give subslot 0.
 - **The expander (subslot register FFFFh) is enabled automatically** when any `<secondary slot>` is greater than 0, or forced by `expander="1"`. `expander_init` is the value of FFFFh after reset (1chipMSX uses `0x2B`). `expander_wo` is stored but currently ignored by the RTL.
 - **Do not mix `<block>` and `<secondary>` in one `<primary>`**: only the direct blocks are written.
-- Slots are written in XML order. Convention in all files: external slots (`<cart>`) last. The reason is not documented; plausibly it is because the `FLASH` block (section 3.2) extends the memory allocated last (not verified as a hard requirement).
+- Slots are written in XML order. External slots (`<cart>`) go last: the `FLASH` block (section 3.2) extends the memory allocated last, which has to be the cartridge ROM.
 - Core limits: at most 64 blocks (4 slots x 4 subslots x 4 pages), 16 memory entries, 8 memory-mapped device entries.
 
 ### 2.4 `<block>`
@@ -89,8 +90,8 @@ Children, each at most once per block (except `<device>`, which may repeat, e.g.
 
 | Child | Attributes and content | Effect |
 |---|---|---|
-| `<memory>ROM</memory>` | `SHA1` (lowercase hex, required), `filename` (informational, printed in the "not found" message), `skip` and `size` (bytes, decimal or hex, cut a slice from the dump), `exactFilename` (path, bypasses the SHA1 lookup; supported, unused) | ROM block. Stored in the pack padded with FF to a multiple of 16 kB (ceil(size/16 kB) must be at most 255) |
-| `<memory>RAM</memory>` | `size` (bytes, default = pages x 16 kB), `pattern` (fill, default 1) | RAM block. 4 MB is encoded as 0. Fill patterns: 1 = FF, 2 = 00, 3/4/5 = DRAM power-on stripes (0 = "data from DDR", do not use for RAM). Machines use 1, 2, 3, 4 |
+| `<memory>ROM</memory>` | `SHA1` (lowercase hex, required), `filename` (informational, printed in the "not found" message), `skip` and `size` (bytes, decimal or hex, cut a slice from the dump), `exactFilename` (path, bypasses the SHA1 lookup; supported, unused) | ROM block. Stored in the pack padded with FF to a multiple of 16 kB |
+| `<memory>RAM</memory>` | `size` (bytes, default = pages x 16 kB), `pattern` (fill, default 1) | RAM block. 4 MB is encoded as 0. `size="8192"` in a one-page block: 8 kB in the upper half of the page, the lower half unmapped (Casio PV-7: E000-FFFF). Fill patterns: 1 = FF, 2 = 00, 3/4/5 = DRAM power-on stripes (0 = "data from DDR", do not use for RAM). Machines use 1, 2, 3, 4 |
 | `<shared_memory>` | text `ROM` = read-only, anything else read/write; `slot`, `subslot`, `block` (source), `offset`, `size` (bytes) | a window into another block's memory. The source block must already exist in the pack. See the `offset` pitfall in section 6 |
 | `<mapper>NAME</mapper>` | name from `mapper.json`; optional `param` 0-3 | MAPPER record. `param` is used only by `DRAM` (which 16 kB page of the top 64 kB RAM). A ROM block without a mapper is linear (`MAPPER_OFFSET`) in the core |
 | `<cart>A</cart>` | `A`/`a`/`0` or `B`/`b`/`1` | marks this block as the cartridge slot A or B (SLOT record). Normally `<block start="0">` (all 4 pages) |
@@ -131,6 +132,7 @@ For a device with an entry, each named attribute contributes bits and the result
 | RESET_STATUS | `inverted` | bit 0 | `reset_status.sv` |
 | OPL4 | `sampleram` bytes, divided by 131072, 0..16 | bits 4:0 | `opl4.sv` |
 | YM2148 | `variant` SFG-01/SFG-05 | bit 0 | `ym2148.sv` |
+| OPM | `variant` YM2151/YM2164 | bit 0 | `opm.sv` (YM2164: test register 09h, timer B at half rate) |
 
 Devices without an entry take the raw `param` attribute (8 bit, default 0).
 
@@ -143,7 +145,7 @@ Derived from `Computer/Philips/Philips_NMS_8245.xml`.
 <msxConfig>
   <cpu>Z80</cpu>                         <!-- Z80 | R800 -->
   <wait_count>1</wait_count>             <!-- M1 wait states -->
-  <cpu_frequency>0</cpu_frequency>       <!-- 0=3.58 1=5.39 2=10.7 MHz -->
+  <cpu_frequency>0</cpu_frequency>       <!-- 0=3.58 1=5.37 2=10.7 3=7.16 MHz -->
   <!-- I/O devices of the machine: decoded when (port & mask) == port -->
   <device mask="0xFC" port="0x98" VDP_ID="V9938">V99xx</device>   <!-- MSX1: <device mask="0xFE" port="0x98" MODE="PAL">TMS99xx</device> -->
   <device mask="0xF8" port="0xA0" system="true">PSG</device>
@@ -233,7 +235,7 @@ The OSD item value is converted to `cart_typ_t` in `rtl/msx_config.sv`, and the 
 
 | Slot A menu | Slot B menu | `cart_typ_t` = FW ID | `cart_device.json` name |
 |---|---|---|---|
-| ROM | ROM | 11 `CART_TYP_ROM` | none (via the DB, IDs 20-57) |
+| ROM | ROM | 11 `CART_TYP_ROM` | none (via the DB, IDs 20-59) |
 | FDC | not available | 5 | `VY0010` |
 | SCC | SCC | 0 | `SCC` |
 | SCC+ | SCC+ | 1 | `SCC+` |
@@ -246,11 +248,12 @@ The OSD item value is converted to `cart_typ_t` in `rtl/msx_config.sv`, and the 
 | not available | MegaRAM ASCII-16K 2MB | 9 | `MEGAASCII16` |
 | Empty | Empty | 12 | none (the empty configuration) |
 | MoonSound | MoonSound | 13 | `MOONSOUND` |
-| not in a menu | not in a menu | 10 | `MEGARAM` (no menu item uses it; 1chipMSX uses the MEGARAM mapper directly in its XML) |
+| MSX-MIDI | MSX-MIDI | 14 | `MSX_MIDI` |
+| not in a menu | not in a menu | 10 `CART_TYP_UNUSED10` | free (1chipMSX uses the MEGARAM mapper directly in its XML) |
 
-- `CART_TYP_ROM` (11) is special: the loader computes the CRC32 of the loaded ROM and asks the DB. The DB record gives the FW ID (20-57). A ROM of at most 64 kB that is not in the DB runs as a plain ROM, with FW ID 20/21/22 chosen from the `AB` header.
+- `CART_TYP_ROM` (11) is special: the loader computes the CRC32 of the loaded ROM and asks the DB. The DB record gives the FW ID (20-59). A ROM of at most 64 kB that is not in the DB runs as a plain ROM, with FW ID 20/21/22 chosen from the `AB` header.
 - `CART_TYP_EMPTY` (12) has no `<fw>` entry; its table slot points to the empty configuration. That is why an empty slot also needs a FW pack.
-- **Free FW IDs**: 14 and 15 for new menu cartridges (`cart_typ_t` and the status fields are 4 bits). For DB mappers: 24, 37-48 except 40-42, and 58 and up.
+- **Free FW IDs**: 10, 14 and 15 for new menu cartridges (`cart_typ_t` and the status fields are 4 bits). For DB mappers: 24, 37-48 except 40-42, and 60 and up.
 - Menu text: `CONF_STR_SLOT_A` / `CONF_STR_SLOT_B` in `rtl/msx_config.sv`.
 
 ## 4. Recipes
@@ -295,7 +298,7 @@ The OSD item value is converted to `cart_typ_t` in `rtl/msx_config.sv`, and the 
 
 ### 5.1 Machine pack (`MSx`)
 
-- Header, 8 bytes: `'M' 'S' 'x' conf 0 0 0 0`, where `conf = cpu<<6 | (wait_count & 7)<<3 | (cpu_frequency & 7)`.
+- Header, 8 bytes: `'M' 'S' 'x' conf engine 0 0 0`, where `conf = cpu<<6 | (wait_count & 7)<<3 | (cpu_frequency & 7)` and `engine` bit 0 = CMOS Z80, bit 1 = wait state on the VDP ports (from `<engine>`).
 - Records are 8 bytes, the first byte is the record type. Order: top-level devices without `shared_slot`, all `<primary>` slots in XML order, top-level devices with `shared_slot`, the keyboard layout. There is no END record: the end of the file ends the pack.
 - BLOCK record: `00 addr type p0 p1 p2 p3 p4` with `addr = slot<<6 | subslot<<4 | start_page<<2 | (count-1)`.
 - DEVICE record (top level): `01 dev_id port mask param size16k shared_ref shared_off`. If `size16k` > 0 and there is no `shared_ref`, the ROM data follows. `shared_ref = 0x80 | slot<<4 | subslot<<2 | block`.
@@ -303,8 +306,8 @@ The OSD item value is converted to `cart_typ_t` in `rtl/msx_config.sv`, and the 
 
 | Block type | Name | Parameters (createComp) |
 |---|---|---|
-| 0 | RAM | p0 = size/16 kB (0 = 256 = 4 MB), p1 = fill pattern |
-| 1 | ROM | p0 = ceil(size/16 kB); data follows |
+| 0 | RAM | p0 = size/16 kB (0 = 256 = 4 MB), p1 = fill pattern, p2 bit 0 = 8 kB in the upper half of the page (p0 = 1) |
+| 1 | ROM | p0, p1 = ceil(size/16 kB) low and high byte; data follows |
 | 2 | SRAM | FW pack only |
 | 3 | DEVICE | p0 = device id, p1 = param |
 | 4 | MAPPER | p0 = mapper id, p1 = (param&3)<<2 |
@@ -325,19 +328,17 @@ The OSD item value is converted to `cart_typ_t` in `rtl/msx_config.sv`, and the 
 
 ## 6. Pitfalls
 
-1. **An absent named parameter encodes as 0**, not as its `default` (e.g. WD2793 without `fdd_count` gives no enabled drive bits; the effect in the core has not been verified).
+1. **An absent named parameter encodes as 0**, not as its `default` (e.g. WD2793 without `fdd_count` gives no enabled drive bits).
 2. **MEM_MAPPER `size` of 4 MB: omit the attribute.** `size="4194304"` gives 256 segments, which is above the maximum 255, so a warning is printed and the default (1 segment, 16 kB) is used. Absent means 256 segments.
-3. **`shared_memory offset="0"` is decoded by the core as 4 MB.** Do not use offset 0.
-4. The **`variant` attribute of OPM has no effect** (OPM has no `deviceParams.json` entry and the module ignores `param`). The YM2148 `variant` (`SFG-01`/`SFG-05`) does work.
-5. **In the extension XML a device with `port` gets the raw `param`**, not the encoded named parameters (the IO_DEVICE record is written with the raw attribute and overwrites the DEVICE param in the core). MegaFlashROM SCC+ SD relies on it: MEM_MAPPER `param="32"` = 32 x 16 kB = 512 kB. createComp, in contrast, writes the encoded value into IO_DEVICE.
-6. Hex numbers work in the machine XML but **not in the extension XML**.
-7. Do not mix `<block>` and `<secondary>` in one `<primary>`.
-8. SHA1 values in XML must be lowercase hex.
-9. A pack is written even when ROMs are missing; only a missing top-level device `ROM_SHA1` deletes it. Check the console.
-10. `<sram>` works only in FW configurations; a machine XML cannot declare SRAM.
-11. `expander_wo` is stored but ignored by the RTL.
-12. Run the tools from inside `tools/CreateMSXpack` (JSON tables by relative name). The ROM folder can be elsewhere: `--rom-dir` in both tools.
-13. Both extension XMLs must be edited together.
+3. **In the extension XML a device with `port` gets the raw `param`**, not the encoded named parameters (the IO_DEVICE record is written with the raw attribute and overwrites the DEVICE param in the core). MegaFlashROM SCC+ SD relies on it: MEM_MAPPER `param="32"` = 32 x 16 kB = 512 kB. createComp, in contrast, writes the encoded value into IO_DEVICE.
+4. Hex numbers work in the machine XML but **not in the extension XML**.
+5. Do not mix `<block>` and `<secondary>` in one `<primary>`.
+6. SHA1 values in XML must be lowercase hex.
+7. createComp builds a pack in memory and writes it only when no ROM is missing and no exception occurred; otherwise an existing `.msx` of that machine is deleted. Missing ROMs (block `SHA1` / `exactFilename`, device `ROM_SHA1`) are collected for the whole machine, so the report lists all of them. Other errors are only warnings in the report. Test: `py -m unittest discover tests`.
+8. `<sram>` works only in FW configurations; a machine XML cannot declare SRAM.
+9. `expander_wo` is stored but ignored by the RTL.
+10. Run the tools from inside `tools/CreateMSXpack` (JSON tables by relative name). The ROM folder can be elsewhere: `--rom-dir` in both tools.
+11. Both extension XMLs must be edited together.
 
 ## 7. Console messages
 

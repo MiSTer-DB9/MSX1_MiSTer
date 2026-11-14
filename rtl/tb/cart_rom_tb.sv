@@ -5,9 +5,12 @@
 // Two ROMs with SRAM in slots A and B each get their own SRAM; blocks without SRAM see none (C9).
 // DDR3 as the HPS fills it: every file whole at its OSD address (CONF_STR of MSX1.sv, given by
 // run_cart_rom.sh), the later download wins where two overlap. A ROM A over 5 MB must not
-// destroy ROM B, a ROM over the area of its slot is refused (C8).
+// destroy ROM B, a ROM over the area of its slot is refused (C8). Without an SDRAM module
+// (sdram_sz of the Menu core) memory above the BRAM stops the load with ERR_NO_MEMORY.
 // Run: wsl.exe -- bash rtl/tb/run_cart_rom.sh <Philips_VG_8020-00.msx> <CART_FW_EN.msx>
 //   OLD=<git rev>: memory_upload.sv of that revision
+//   NOSZ=1: memory_upload without the sdram_sz port (before the memory check)
+//   +busy: DDR3 randomly busy (Avalon waitrequest), a read is taken only when not busy
 module cart_rom_tb;
 
 logic clk = 0;
@@ -28,9 +31,10 @@ logic [28:0] DDRAM_ADDR;
 logic [63:0] DDRAM_DOUT, DDRAM_DIN;
 logic        DDRAM_DOUT_READY = 0, DDRAM_RD, DDRAM_WE;
 logic        ddr_reset = 1;
+logic        busy_en = 0, DDRAM_BUSY = 0;
 
 ddram ddr (
-    .reset(ddr_reset), .DDRAM_CLK(clk), .DDRAM_BUSY(1'b0), .DDRAM_BURSTCNT(DDRAM_BURSTCNT),
+    .reset(ddr_reset), .DDRAM_CLK(clk), .DDRAM_BUSY(DDRAM_BUSY), .DDRAM_BURSTCNT(DDRAM_BURSTCNT),
     .DDRAM_ADDR(DDRAM_ADDR), .DDRAM_DOUT(DDRAM_DOUT), .DDRAM_DOUT_READY(DDRAM_DOUT_READY),
     .DDRAM_RD(DDRAM_RD), .DDRAM_DIN(DDRAM_DIN), .DDRAM_BE(DDRAM_BE), .DDRAM_WE(DDRAM_WE),
     .addr(ddr3_addr), .dout(ddr3_dout), .din(8'h00), .we(1'b0), .rd(ddr3_rd), .ready(ddr3_ready),
@@ -52,7 +56,8 @@ logic [28:0] rd_addr;
 int          rd_wait = -1;
 always_ff @(posedge clk) begin
     DDRAM_DOUT_READY <= 1'b0;
-    if (DDRAM_RD) begin rd_addr <= DDRAM_ADDR; rd_wait <= LAT; end
+    DDRAM_BUSY <= busy_en && $urandom_range(3) == 0;
+    if (DDRAM_RD && !DDRAM_BUSY) begin rd_addr <= DDRAM_ADDR; rd_wait <= LAT; end
     else if (rd_wait > 0) rd_wait <= rd_wait - 1;
     else if (rd_wait == 0) begin
         for (int b = 0; b < 8; b++) DDRAM_DOUT[8*b +: 8] <= ddr_byte({rd_addr[24:0], 3'(b)});
@@ -91,6 +96,7 @@ MSX::io_device_t         io_device[32][3];
 MSX::io_device_mem_ref_t io_memory[8];
 MSX::msx_config_t        msx_config;
 error_t                  error;
+logic             [15:0] sdram_sz = '0;    // hps_io: unset
 wire                     upload, load_sram, upload_reset;
 
 memory_upload dut (
@@ -105,6 +111,9 @@ memory_upload dut (
     .layout_id(layout_id), .active_block(active_block), .active_RAM(active_RAM), .main_RAM(main_RAM),
 `endif
     .lookup_SRAM(lookup_SRAM), .cart_conf(cart_conf), .io_device(io_device), .io_memory(io_memory),
+`ifndef NO_SDRAM_SZ
+    .sdram_sz(sdram_sz),
+`endif
     .msx_config(msx_config), .load_sram(load_sram), .error(error), .reset(upload_reset)
 );
 
@@ -145,7 +154,8 @@ task automatic download(input int idx, input int unsigned size, input bit wait_u
     endcase
     ioctl_index = 16'(idx); ioctl_download = 1;
     @(posedge clk); ioctl_addr = 27'(size);
-    @(posedge clk); ioctl_download = 0;
+    // hps_io (2026): the end of a download adds 1 to ioctl_addr, also with no data sent
+    @(posedge clk); ioctl_download = 0; ioctl_addr = ioctl_addr + 1'd1;
     if (wait_upload) begin wait (upload); wait (!upload); end
     repeat (10) @(posedge clk);
 endtask
@@ -156,6 +166,13 @@ task automatic make_rom(input int size, input int hdr, input logic [15:0] init);
     for (int i = 0; i < size; i++) rom.push_back(8'(i * 7 + (i >> 9) + 3));
     for (int i = 0; i < size; i += 16384) begin rom[i] = 8'h00; rom[i + 1] = 8'h00; end   // no stray 'AB'
     if (hdr >= 0) begin rom[hdr] = 8'h41; rom[hdr + 1] = 8'h42; rom[hdr + 2] = init[7:0]; rom[hdr + 3] = init[15:8]; end
+endtask
+
+// Database with one entry: the CRC32 of rom as KONAMI (cart_device.json 52)
+task automatic db_konami();
+    logic [31:0] crc = crc32(rom);
+    db = {crc[7:0], crc[15:8], crc[23:16], crc[31:24], 8'd52, 8'h00, 8'h00, 8'h00};
+    download(6, db.size(), 0);
 endtask
 
 // Load ROM A; expect the pages of slot 1-0 (-1: no ROM there, else ROM offset in kB / 16)
@@ -283,6 +300,36 @@ endtask
 
 // C8: ROM B (32 kB plain, pages 1-2 of slot 2) loaded first, then a ROM A of 5.25 MB
 // (ASCII16-X in the database): ROM B must stay intact. Then a ROM A of 17 MB is refused.
+// MSX-MIDI cartridge (FW configuration 14): device at E8h-EFh, its slot empty; one copy only
+task automatic check_msx_midi(input string what);
+    int err0 = errors;
+    MSX::io_device_t d;
+    rom = {}; rom_b = {};
+    download(3, 0, 0); download(4, 0, 0);
+    cart_conf[0].typ = CART_TYP_MSX_MIDI;
+    cart_conf[1].typ = CART_TYP_EMPTY;
+    download(1, pack.size(), 1);
+    snapshot();
+    d = io_device[DEV_MSX_MIDI][0];
+    if (error !== ERR_NONE) begin errors++; $display("FAIL %s: error %0d", what, error); end
+    if (!d.enable || d.port !== 8'hE8 || d.mask !== 8'hF8) begin
+        errors++; $display("FAIL %s: device enable %b port %02h mask %02h", what, d.enable, d.port, d.mask);
+    end
+    for (int p = 0; p < 4; p++)
+        if (slot_layout[{2'd1, 2'd0, 2'(p)}].mapper !== MAPPER_NONE) begin
+            errors++; $display("FAIL %s: slot 1 page %0d mapper %0d", what, p, slot_layout[{2'd1, 2'd0, 2'(p)}].mapper);
+        end
+    cart_conf[1].typ = CART_TYP_MSX_MIDI;                 // both slots: a second copy is not built
+    download(1, pack.size(), 0);
+    wait (upload); wait (!upload || error != ERR_NONE); repeat (10) @(posedge clk);
+    if (error !== ERR_DEVICE_MISSING) begin errors++; $display("FAIL %s: in A and B error %0d (expected %0d)", what, error, ERR_DEVICE_MISSING); end
+    cart_conf[0].typ = CART_TYP_EMPTY; cart_conf[1].typ = CART_TYP_EMPTY;
+    download(1, pack.size(), 1);
+    if (io_device[DEV_MSX_MIDI][0].enable) begin errors++; $display("FAIL %s: device left enabled without the cartridge", what); end
+    cart_conf[0].typ = CART_TYP_ROM; cart_conf[1].typ = CART_TYP_ROM;
+    if (errors == err0) $display("ok   %s", what);
+endtask
+
 task automatic check_rom_areas(input string what);
     localparam int BIG = 5 * 1048576 + 262144;
     logic [31:0] crc;
@@ -327,6 +374,7 @@ initial begin
         !$value$plusargs("db=%h", DB_ADDR) || !$value$plusargs("fwaddr=%h", FW_ADDR)) begin
         $display("usage: +pack=<machine.msx> +fw=<CART_FW_EN.msx> +rom_a= +rom_b= +db= +fwaddr=<hex>"); $finish;
     end
+    busy_en = $test$plusargs("busy");
     $display("DDR3 areas: FW %07h, ROM A %07h, ROM B %07h, DB %07h", FW_ADDR, ROM_A_ADDR, ROM_B_ADDR, DB_ADDR);
     fd = $fopen(pack_name, "rb"); while ((c = $fgetc(fd)) != -1) pack.push_back(8'(c)); $fclose(fd);
     fd = $fopen(fw_name, "rb");   while ((c = $fgetc(fd)) != -1) fw.push_back(8'(c));   $fclose(fd);
@@ -383,6 +431,22 @@ initial begin
     download(6, db.size(), 0);
     check("32 kB in DB as KONAMI", 0, 0, 0, 0, MAPPER_KONAMI);
 
+    // --- no SDRAM module: the cartridge must fit into the BRAM after the machine
+    begin
+        int unsigned base = lookup_RAM[slot_layout[{2'd1, 2'd0, 2'd1}].ref_ram].addr;
+        int unsigned room = (1 << MSX::BRAM_WIDTH) - base;
+        $display("cartridge memory from %0d kB, %0d kB left in the BRAM", base / 1024, room / 1024);
+        make_rom(room, 0, 16'h4010);          db_konami();
+        sdram_sz = 16'h8000; check("no SDRAM, ROM fills the BRAM exactly", 0, 0, 0, 0, MAPPER_KONAMI);
+        make_rom(room + 16384, 0, 16'h4010);  db_konami();
+        sdram_sz = 16'h8000; check("no SDRAM, ROM 16 kB over the BRAM", -1, -1, -1, -1, MAPPER_OFFSET, ERR_NO_MEMORY);
+        sdram_sz = 16'h0000; check("SDRAM unknown (no Menu core), same ROM", 0, 0, 0, 0, MAPPER_KONAMI);
+        sdram_sz = 16'h8001; check("32 MB SDRAM, same ROM", 0, 0, 0, 0, MAPPER_KONAMI);
+        sdram_sz = 16'hC000; check("Menu core debug mode, same ROM", 0, 0, 0, 0, MAPPER_KONAMI);
+        sdram_sz = 16'h8000; check("no SDRAM again, same ROM", -1, -1, -1, -1, MAPPER_OFFSET, ERR_NO_MEMORY);
+        sdram_sz = '0;
+    end
+
     // --- ASCII16-X: flash of 8 MB with the ROM image at its start
     make_rom(131072, 0, 16'h4010);  check_ascii16x("128 kB in DB as ASCII16-X");
     make_rom(100000, 0, 16'h4010);  check_ascii16x("100000 B in DB as ASCII16-X");
@@ -392,6 +456,8 @@ initial begin
 
     // --- C8: areas of ROM A and ROM B in the DDR3
     check_rom_areas("ROM A of 5.25 MB beside ROM B, ROM A of 17 MB");
+
+    check_msx_midi("MSX-MIDI cartridge in slot A, not in both");
 
     if (errors == 0) $display("PASS cart_rom_tb");
     else             $display("FAILED cart_rom_tb: %0d errors", errors);

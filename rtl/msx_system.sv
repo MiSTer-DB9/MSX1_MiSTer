@@ -40,6 +40,7 @@ module msx_system (
     input                       img_readonly,
     input              [63:0]   img_size,
     input                       sd_img_mounted,         // virtual SD card image (block_device_SD)
+    input                       osd_status,             // OSD open (emu OSD_STATUS)
     block_device_if.device_mp   block_device_FDD[2*MSX::N_FDC],
     output MSX::msx_config_t    msx_config,
 
@@ -48,8 +49,10 @@ module msx_system (
     output             [15:0]   audio_L,
     output             [15:0]   audio_R,
     output                      led_turbo,              // turbo R: R800 running (pause device bit 7)
-    output                      led_pause,
+    output                      led_pause,              // machine paused, or turbo R pause LED (A7h)
+    output                      pause,                  // CPU held by a pause: freeze the HDMI picture
     input                       uart_rxd,
+    output                      uart_txd,
     input                       tape_adc,               // tape input from ADC
     ext_sd_card_if.device_mp    ext_SD_card_bus,
 
@@ -59,10 +62,10 @@ module msx_system (
     memory_bus_if.device_mp     memory_bus_sdram_ch3,
     wave_bus_if.device_mp       wave_bus_sdram_ch4,     // OPL4 sample memory
     output                      cpu_phase,              // clk in which the CPU may start a bus access
+    output                      cpu_phase_next,         // cpu_phase one clk ahead (SDRAM)
     output             [27:0]   ddr3_addr,
     output                      ddr3_rd,
     input               [7:0]   ddr3_dout,
-    input              [63:0]   ddr3_dout64,
     input                       ddr3_ready
 );
 
@@ -113,7 +116,7 @@ assign status_menumask[3]     = io_device[DEV_OCM_BOOT][0].enable;
 assign status_menumask[9:4]   = msx_config.fdd[5:0];
 assign status_menumask[10]    = lookup_SRAM[0].size + lookup_SRAM[1].size + lookup_SRAM[2].size + lookup_SRAM[3].size == 0;
 assign status_menumask[11]    = msx_user_config.cas_audio_src == CAS_AUDIO_ADC || io_device[DEV_OCM_BOOT][0].enable;   // no CAS file (OCM: no tape)
-assign status_menumask[12]    = io_device[DEV_S1990][0].enable;    // turbo R options (firmware switch)
+assign status_menumask[12]    = io_device[DEV_S1990][0].enable || io_device[DEV_MATSUSHITA][0].enable;    // firmware switch
 assign status_menumask[15:13] = '0;
 
 assign info_req = error != ERR_NONE;
@@ -124,6 +127,7 @@ user_config user_config
    .clk(clock_bus.clk),
    .reset(reset),
    .HPS_status(status[63:0]),
+   .osd_status(osd_status),
    .sdram_size(sdram_sz[15] ? sdram_sz[1:0] : 2'b00),
    .cart_conf(cart_conf),
    .reload(reload),
@@ -154,6 +158,7 @@ msx #(.sysCLK(sysCLK)) MSX
    .memory_bus(memory_bus_msx),
    .wave_bus(wave_bus),
    .cpu_phase(cpu_phase),
+   .cpu_phase_next(cpu_phase_next),
    .audio_L(audio_L),
    .audio_R(audio_R),
    .ps2_key(ps2_key),
@@ -161,6 +166,7 @@ msx #(.sysCLK(sysCLK)) MSX
    .joy(joy),
    .uart_rx_data(uart_rx_data),
    .uart_rx(uart_rx),
+   .uart_tx(uart_txd),
    .tape_motor_on(motor),
    .tape_in(msx_user_config.cas_audio_src == CAS_AUDIO_FILE ? CAS_dout : tape_adc),
    .rtc_time(rtc),
@@ -169,6 +175,7 @@ msx #(.sysCLK(sysCLK)) MSX
    .sram_load(status[39]),
    .led_turbo(led_turbo),
    .led_pause(led_pause),
+   .pause(pause),
    .ioctl_download(ioctl_download),
    .ioctl_index(ioctl_index),
    .ioctl_addr(ioctl_addr),
@@ -221,6 +228,7 @@ memory_upload memory_upload(
    .lookup_SRAM(lookup_SRAM),
    .main_ram(main_ram),
    .cart_conf(cart_conf),
+   .sdram_sz(sdram_sz),
    .load_sram(load_sram),
    .io_device(io_device),
    .io_memory(io_memory),
@@ -263,7 +271,7 @@ assign memory_bus_backup.sram_cs = 1'b0;
 assign backup_ram_dout           = memory_bus_backup.q;
 assign backup_ram_ready          = memory_bus_backup.sdram_ready;
 
-system_memory #(.BRAM_WIDTH(18)) system_memory(
+system_memory #(.BRAM_WIDTH(MSX::BRAM_WIDTH)) system_memory(
    .clk(clock_bus.clk),
    .memory_bus_msx(memory_bus_msx),
    .memory_bus_upload(memory_bus_upload),
@@ -334,6 +342,10 @@ always_ff @(posedge clock_bus.clk) begin
    ioctl_download_last <= ioctl_isCAS;
 end
 
+// File size: sent by HPS at the start of a download straight into DDR3, held in ioctl_addr
+logic [26:0] cas_size = '0;
+always_ff @(posedge clock_bus.clk) if (ioctl_isCAS) cas_size <= ioctl_addr;
+
 tape cass
 (
    .clk(clock_bus.clk),
@@ -341,12 +353,12 @@ tape cass
    .cas_out(CAS_dout),
    .ram_a(ddr3_addr_cas),
    .ram_di(ddr3_dout),
-   .ram_di64(ddr3_dout64),
    .ram_rd(ddr3_rd_cas),
    .buff_mem_ready(ddr3_ready),
    .play(~motor & cas_load),
    .rewind(status[9] | ioctl_isCAS | reset),
-   .enable(cas_load)
+   .enable(cas_load),
+   .size(cas_size)
 );
 
 /////////////////   FLOPPY DRIVES   /////////////////

@@ -1,5 +1,6 @@
 // Original megasd.vhd SD/MMC card interface
 // Copyright (c) 2006 Kazuhiro Tsujikawa (ESE Artists' factory)
+// Taken from OCM-PLD by KdL as used in MSX_MiSTer (https://github.com/MiSTer-devel/MSX_MiSTer).
 //
 // Rewrite and modify 2024-2025 Molekula
 //
@@ -49,7 +50,9 @@ module mapper_eseRam (
   
     wire cs;
 
-    assign cs = block_info.typ == MAPPER_ESE_RAM & cpu_bus.mreq && (cpu_bus.rd || cpu_bus.wr);
+    // only 0x4000-0xBFFF, as openMSX ESE_RAM (the bank selection uses addr[14:13] alone)
+    assign cs = block_info.typ == MAPPER_ESE_RAM & cpu_bus.mreq && (cpu_bus.rd || cpu_bus.wr) &&
+                (cpu_bus.addr[15] ^ cpu_bus.addr[14]);
 
     logic [7:0] bank[4];
 

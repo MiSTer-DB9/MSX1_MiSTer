@@ -31,6 +31,7 @@ module msx #(parameter sysCLK)
    memory_bus_if.device_mp  memory_bus,
    wave_bus_if.device_mp    wave_bus,             // OPL4 sample memory
    output                   cpu_phase,            // clk in which the CPU may start a bus access
+   output                   cpu_phase_next,       // cpu_phase one clk ahead
    //I/O
    output            [15:0] audio_L,
    output            [15:0] audio_R,
@@ -40,6 +41,7 @@ module msx #(parameter sysCLK)
    //UART
    input              [7:0] uart_rx_data,
    input                    uart_rx,
+   output                   uart_tx,
    //Cassete
    output                   tape_motor_on,
    input                    tape_in,
@@ -49,7 +51,8 @@ module msx #(parameter sysCLK)
    input                    sram_save,
    input                    sram_load,
    output                   led_turbo,            // turbo R: R800 LED (pause device bit 7)
-   output                   led_pause,
+   output                   led_pause,            // machine paused, or turbo R pause LED (A7h)
+   output                   pause,                // CPU held by a pause (machine or turbo R hardware)
    //IOCTL
    input                    ioctl_download,
    input             [15:0] ioctl_index,
@@ -105,8 +108,8 @@ wire                 keybeep;
 wire                 reset_lock, reset_request;
 wire                 ocm_megaSD_enable, ocm_slot1_mode;
 wire           [1:0] ocm_slot2_mode;
-wire                 ocm_ipl_en, ocm_mmc_on, ocm_mmc_wait, opll_wait, opl4_wait;
-wire                 turbor_r800, turbor_dram, turbor_pause;
+wire                 ocm_ipl_en, ocm_mmc_on, sd_wait, opll_wait, opl4_wait, ocm_slot0_mode;
+wire                 turbor_r800, turbor_dram, io_hold;
 MSX::cpu_speed_t     cpu_speed;
 wire signed   [15:0] device_sound_L, device_sound_R;
 
@@ -133,13 +136,14 @@ assign audio_R = device_sound_R;
 //  -- T80 CPU
 //  -----------------------------------------------------------------------------
 assign cpu_bus.mreq    = ~mreq_n;
-assign cpu_bus.iorq    = ~iorq_n;
+// io_hold: a VDP access that came too early (R800, Matsushita turbo) starts later
+assign cpu_bus.iorq    = ~iorq_n && ~io_hold;
 assign cpu_bus.m1      = ~m1_n;
-assign cpu_bus.rd      = ~rd_n;
-assign cpu_bus.wr      = ~wr_n;
+assign cpu_bus.rd      = ~rd_n && ~io_hold;
+assign cpu_bus.wr      = ~wr_n && ~io_hold;
 assign cpu_bus.rfsh    = ~rfsh_n;
 assign cpu_bus.int_rq  = cpu_interrupt;
-assign cpu_bus.req     = ~((iorq_n & mreq_n) | (wr_n & rd_n) | iack);
+assign cpu_bus.req     = ~((iorq_n & mreq_n) | (wr_n & rd_n) | iack | io_hold);
 
 always_ff @(posedge cpu_bus.clk) begin
    if (cpu_bus.reset)
@@ -161,13 +165,17 @@ msx_cpu cpu (
    .m1_wait   (msx_config.wait_count),
    .mem_wait  (cpu_speed.mem_wait),
    .io_wait   (cpu_speed.io_wait),
-   .ext_wait  (ocm_mmc_wait || opll_wait || opl4_wait || turbor_pause),
+   .ext_wait  (sd_wait || opll_wait || opl4_wait || pause),
    .r800      (msx_config.cpu == R800 || msx_user_config.ocm_r800),
    .r800_sel  (turbor_r800),
-   .turbor    (io_device[DEV_S1990][0].enable),
-   .cold_reset(core_hard_reset),
+   .cmos_z80  (msx_config.cmos_z80),
+   .vdp_io_wait(msx_config.vdp_io_wait),
+   .vdp_wr_hold(cpu_speed.vdp_wr_hold),
+   .vdp_wr_wait(cpu_speed.vdp_wr_wait),
+   .io_hold   (io_hold),
    .r800_active(),
    .bus_phase (cpu_phase),
+   .bus_phase_next(cpu_phase_next),
    .int_rq    (cpu_interrupt),
    .di        (d_to_cpu),
    .m1_n      (m1_n),
@@ -237,6 +245,7 @@ devices #(.sysCLK(sysCLK)) devices
    .ps2_mouse(ps2_mouse),
    .rtc_time(rtc_time),
    .uart_rx(uart_rx),
+   .uart_tx(uart_tx),
    .uart_rx_data(uart_rx_data),
    .joy(joy),
    .tape_in(tape_in),
@@ -251,14 +260,15 @@ devices #(.sysCLK(sysCLK)) devices
    .opl4_wait(opl4_wait),
    .turbor_r800(turbor_r800),
    .turbor_dram(turbor_dram),
-   .turbor_pause(turbor_pause),
-   .turbor_pause_led(led_pause),
+   .pause(pause),
+   .pause_led(led_pause),
    .turbor_turbo_led(led_turbo),
    .ocm_mmc_on(ocm_mmc_on),
    .ocm_megaSD_enable(ocm_megaSD_enable),
    .ocm_slot1_mode(ocm_slot1_mode),
    .ocm_slot2_mode(ocm_slot2_mode),
-   .ocm_ipl_en(ocm_ipl_en)
+   .ocm_ipl_en(ocm_ipl_en),
+   .ocm_slot0_mode(ocm_slot0_mode)
 );
 
 msx_slots msx_slots
@@ -286,8 +296,9 @@ msx_slots msx_slots
    .ocm_slot1_mode(ocm_slot1_mode),
    .ocm_slot2_mode(ocm_slot2_mode),
    .ocm_ipl_en(ocm_ipl_en),
+   .ocm_slot0_mode(ocm_slot0_mode),
    .ocm_mmc_on(ocm_mmc_on),
-   .ocm_mmc_wait(ocm_mmc_wait)
+   .sd_wait(sd_wait)
 );
 
 endmodule

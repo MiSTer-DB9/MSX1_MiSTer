@@ -17,175 +17,15 @@
 //============================================================================
 module emu
 (
-   //Master input clock
-   input         CLK_50M,
-
-   //Async reset from top-level module.
-   //Can be used as initial reset.
-   input         RESET,
-
-   //Must be passed to hps_io module
-   inout  [48:0] HPS_BUS,
-
-   //Base video clock. Usually equals to CLK_SYS.
-   output        CLK_VIDEO,
-
-   //Multiple resolutions are supported using different CE_PIXEL rates.
-   //Must be based on CLK_VIDEO
-   output        CE_PIXEL,
-
-   //Video aspect ratio for HDMI. Most retro systems have ratio 4:3.
-   //if VIDEO_ARX[12] or VIDEO_ARY[12] is set then [11:0] contains scaled size instead of aspect ratio.
-   output [12:0] VIDEO_ARX,
-   output [12:0] VIDEO_ARY,
-
-   output  [7:0] VGA_R,
-   output  [7:0] VGA_G,
-   output  [7:0] VGA_B,
-   output        VGA_HS,
-   output        VGA_VS,
-   output        VGA_DE,    // = ~(VBlank | HBlank)
-   output        VGA_F1,
-   output [1:0]  VGA_SL,
-   output        VGA_SCALER, // Force VGA scaler
-   output        VGA_DISABLE, // analog out is off
-
-   input  [11:0] HDMI_WIDTH,
-   input  [11:0] HDMI_HEIGHT,
-   output        HDMI_FREEZE,
-   output        HDMI_BLACKOUT,
-   output        HDMI_BOB_DEINT,
-
-`ifdef MISTER_FB
-   // Use framebuffer in DDRAM
-   // FB_FORMAT:
-   //    [2:0] : 011=8bpp(palette) 100=16bpp 101=24bpp 110=32bpp
-   //    [3]   : 0=16bits 565 1=16bits 1555
-   //    [4]   : 0=RGB  1=BGR (for 16/24/32 modes)
-   //
-   // FB_STRIDE either 0 (rounded to 256 bytes) or multiple of pixel size (in bytes)
-   output        FB_EN,
-   output  [4:0] FB_FORMAT,
-   output [11:0] FB_WIDTH,
-   output [11:0] FB_HEIGHT,
-   output [31:0] FB_BASE,
-   output [13:0] FB_STRIDE,
-   input         FB_VBL,
-   input         FB_LL,
-   output        FB_FORCE_BLANK,
-
-`ifdef MISTER_FB_PALETTE
-   // Palette control for 8bit modes.
-   // Ignored for other video modes.
-   output        FB_PAL_CLK,
-   output  [7:0] FB_PAL_ADDR,
-   output [23:0] FB_PAL_DOUT,
-   input  [23:0] FB_PAL_DIN,
-   output        FB_PAL_WR,
-`endif
-`endif
-
-   output        LED_USER,  // 1 - ON, 0 - OFF.
-
-   // b[1]: 0 - LED status is system status OR'd with b[0]
-   //       1 - LED status is controled solely by b[0]
-   // hint: supply 2'b00 to let the system control the LED.
-   output  [1:0] LED_POWER,
-   output  [1:0] LED_DISK,
-
-   // I/O board button press simulation (active high)
-   // b[1]: user button
-   // b[0]: osd button
-   output  [1:0] BUTTONS,
-
-   input         CLK_AUDIO, // 24.576 MHz
-   output [15:0] AUDIO_L,
-   output [15:0] AUDIO_R,
-   output        AUDIO_S,   // 1 - signed audio samples, 0 - unsigned
-   output  [1:0] AUDIO_MIX, // 0 - no mix, 1 - 25%, 2 - 50%, 3 - 100% (mono)
-
-   //ADC
-   inout   [3:0] ADC_BUS,
-
-   //SD-SPI
-   output        SD_SCK,
-   output        SD_MOSI,
-   input         SD_MISO,
-   output        SD_CS,
-   input         SD_CD,
-
-   //High latency DDR3 RAM interface
-   //Use for non-critical time purposes
-   output        DDRAM_CLK,
-   input         DDRAM_BUSY,
-   output  [7:0] DDRAM_BURSTCNT,
-   output [28:0] DDRAM_ADDR,
-   input  [63:0] DDRAM_DOUT,
-   input         DDRAM_DOUT_READY,
-   output        DDRAM_RD,
-   output [63:0] DDRAM_DIN,
-   output  [7:0] DDRAM_BE,
-   output        DDRAM_WE,
-
-   //SDRAM interface with lower latency
-   output        SDRAM_CLK,
-   output        SDRAM_CKE,
-   output [12:0] SDRAM_A,
-   output  [1:0] SDRAM_BA,
-   inout  [15:0] SDRAM_DQ,
-   output        SDRAM_DQML,
-   output        SDRAM_DQMH,
-   output        SDRAM_nCS,
-   output        SDRAM_nCAS,
-   output        SDRAM_nRAS,
-   output        SDRAM_nWE,
-
-`ifdef MISTER_DUAL_SDRAM
-   //Secondary SDRAM
-   //Set all output SDRAM_* signals to Z ASAP if SDRAM2_EN is 0
-   input         SDRAM2_EN,
-   output        SDRAM2_CLK,
-   output [12:0] SDRAM2_A,
-   output  [1:0] SDRAM2_BA,
-   inout  [15:0] SDRAM2_DQ,
-   output        SDRAM2_nCS,
-   output        SDRAM2_nCAS,
-   output        SDRAM2_nRAS,
-   output        SDRAM2_nWE,
-`endif
-
-   input         UART_CTS,
-   output        UART_RTS,
-   input         UART_RXD,
-   output        UART_TXD,
-   output        UART_DTR,
-   input         UART_DSR,
-
-   // Open-drain User port.
-   // 0 - D+/RX
-   // 1 - D-/TX
-   // 2..6 - USR2..USR6
-   // Set USER_OUT to 1 to read from USER_IN.
-   // [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: USER_OSD, USER_PP, 8-bit USER_IO
-   output        USER_OSD,
-   output  [7:0] USER_PP,
-   input   [7:0] USER_IN,
-   output  [7:0] USER_OUT,
-   // [MiSTer-DB9 END]
-
-   input         OSD_STATUS
+	`include "sys/emu_ports.vh"
 );
 
-// emu bridges the MSX system (rtl/msx_system.sv) to the MiSTer framework:
-// hps_io, PLL and clock enables, video output, SDRAM / DDR3 / SD card / ADC pins.
-
 ///////// Default values for ports not used in this core /////////
-assign {UART_RTS, UART_TXD, UART_DTR} = 0;
+assign {UART_RTS, UART_DTR} = 0;
 
 assign VGA_F1 = 0;
 assign VGA_SCALER  = 0;
 assign VGA_DISABLE = 0;
-assign HDMI_FREEZE = 0;
 assign HDMI_BLACKOUT = 0;
 assign HDMI_BOB_DEINT = 0;
 
@@ -217,8 +57,17 @@ wire  [15:0] joy_raw_payload;
 
 // SNAC cores: replace 1'b0 with the core's SNAC enable expression. MSX1 has no SNAC.
 wire         snac_active         = 1'b0;
-// MT32-pi probe-suppression gate. MSX1 does not instantiate mt32pi -> 1'b0.
-wire         mt32_primary_active = 1'b0;
+// MT32-pi probe-suppression gate. Upstream MSX2 added midi_port (rtl/midi_port.sv)
+// with mt32pi on the user port; MT32-pi mode is status[44:43]==0, enabled = ~status[45].
+wire         mt32_primary_active = (status[44:43] == 2'd0) & ~status[45];
+// [MiSTer-DB9 BEGIN] - MT32 anti-contention double-gate (upstream midi_port owns mt32pi)
+// Gate 1: mask USER_IN into midi_port's mt32pi I2C probe while a DB9 controller is
+// active or MT32 is disabled, so DB9 levels can never scan as I2C and latch
+// mt32_available. Gate 2 (USER_OUT mux) is at the assign below.
+wire         mt32_disable  = status[45];
+wire   [6:0] USER_IN_MT32  = (joy_any_en | mt32_disable) ? 7'h7F : USER_IN[6:0];
+wire   [6:0] USER_OUT_MT32;
+// [MiSTer-DB9 END]
 
 // joydb_*_mapped = MiSTer-standard joystick words (consumed in Layer B);
 // db9_remap_* = 0xFD selector stream driven by the hps_io instance.
@@ -280,7 +129,12 @@ joydb joydb (
   .joy_raw             ( joy_raw_payload       )
 );
 
-assign USER_OUT = USER_OUT_DRIVE;
+// Gate 2: the DB9 wrapper owns USER_OUT while a DB9 controller is active; otherwise
+// upstream midi_port drives it (MT32-pi when enabled, MIDI In/Out in port mode 1,
+// idle-high when the user port is Off).
+assign USER_OUT = joy_any_en ? USER_OUT_DRIVE
+                : (~mt32_disable | (status[44:43] == 2'd1)) ? {1'b1, USER_OUT_MT32}
+                : 8'hFF;
 assign USER_PP  = USER_PP_DRIVE;
 // [MiSTer-DB9 END]
 clock #(.sysCLK(MSX::CLK_CORE_HZ)) clock
@@ -314,20 +168,31 @@ reset_sync rst_sync_sdram (.clk(clk_sdram), .arst(~locked_sdram),          .rst(
 //  [22]     OCM slot 1 (internal ESE-SCC)
 //  [24:23]  OCM slot 2 (internal ESE-SCC / MegaRAM)
 //  [25]     vertical crop
-//  [26]     turbo R firmware switch
+//  [26]     firmware switch (turbo R, machines with the Matsushita switched I/O)
+//  [27]     pause when OSD open
 //  [32:29]  slot B cartridge type (not OCM)
 //  [38]     SRAM save
 //  [39]     SRAM load
 //  [40]     tape input (file / ADC)
 //  [41]     border
-// Free: [28:27], [37:33], [127:42]
+//  [42]     tape monitor (0 = on)
+//  [44:43]  user port: MT32-pi / MIDI adapter / off
+//  [45]     use MT32-pi (0 = yes)
+//  [47:46]  MT32-pi info: none / OSD message / LCD on / LCD after an update
+//  [48]     MT32-pi synth: Munt / FluidSynth
+//  [50:49]  MT32-pi Munt ROM set
+//  [53:51]  MT32-pi SoundFont
+//  [54]     MT32-pi reset (hanging notes)
+// Free: [28], [37:33], [127:55]
+// status_menumask: [12:0] msx_system, [13] MT32-pi found, [14] toggles on its mode report
+// (the OSD is redrawn when the mask changes)
 `include "build_id.v"
 localparam CONF_STR = {
    "MSX1;UART115200,MIDI;",
    "-;",
    // load addresses = MSX::DDR3_* (package.sv)
    "FC1,MSX,Load ROM PACK,30000000;",
-   "FC2,MSX,Load FW  PACK,30300000;",
+   "FC2,MSX,Load FW  PACK,30800000;",
    "FC6,DB,Load DB MAPPERS,31600000;",
    "-;",
    // drives of FDC position 0 (internal FDC or FDC cartridge in slot A); N_FDC = 2 would add
@@ -357,14 +222,27 @@ localparam CONF_STR = {
    "h3-;",
    "h3O[13],Joysticks Swap,No,Yes;",
    "h3O[14],Mouse,Port 1,Port 2;",
-   // turbo R (hC): machines with the S1990
+   // firmware switch (hC): machines with the S1990 or the Matsushita switched I/O
    "hC-;",
    "hCO[26],Firmware switch,Off,On;",
    "H3-;",
    "H3O[40],Tape Input,File,ADC;",
+   "H3O[42],Tape Monitor,On,Off;",
    "HBF5,CAS,Cas File,31700000;",
    "HBT9,Tape Rewind;",
    "-;",
+   "P2,MIDI;",
+   "P2O[44:43],User Port,MT32-pi,MIDI In/Out,Off;",
+   "hDP2-;",
+   "hDP2O[45],Use MT32-pi,Yes,No;",
+   "hDP2O[47:46],Show Info,No,Yes,LCD-On,LCD-Auto;",
+   "hDP2-;",
+   "hDP2-,Default Config:;",
+   "hDP2O[48],Synth,Munt,FluidSynth;",
+   "hDP2O[50:49],Munt ROM,MT-32 v1,MT-32 v2,CM-32L;",
+   "hDP2O[53:51],SoundFont,0,1,2,3,4,5,6,7;",
+   "hDP2-;",
+   "hDP2R[54],Reset Hanging Notes;",
    "P1,Video settings;",
    "P1O[2:1],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
    "P1O[5:3],Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
@@ -372,14 +250,23 @@ localparam CONF_STR = {
    "P1O[8:6],Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer,HV-Integer;",
    "P1O[41],Border,No,Yes;",
    "-;",
+   "O[27],Pause when OSD open,No,Yes;",
    // [MiSTer-DB9-Pro BEGIN] - Saturn-first joy_type (canonical bit notation)
    "O[127:126],UserIO Joystick,Off,Saturn,DB9MD,DB15;",
    "O[125],UserIO Players, 1 Player,2 Players;",
    // [MiSTer-DB9-Pro END]
+   //Can be used as initial reset.
    "T[21],Reset;",
    "H3R[10],Reset & Detach ROM Cartridge;",
    "R[21],Reset and close OSD;",
-   "I,BAD MSX CONF,NOT SUPPORTED CONF,NOT SUPPORTED BLOCK,BAD MSX FW CONF,NOT FW CONF,DEVICE MISSING,Device not in this core build,No CRC32 DB,Not find CRC32 in DB,SMALL MEMORY,FDC already in machine,ROM too big;",
+   // joystick button names (joy bit 4 = trigger A, 5 = trigger B); not "J1", it forces
+   // keyboard joystick emulation and takes the cursor keys
+   "J,Fire 1,Fire 2;",
+   "I,BAD MSX CONF,NOT SUPPORTED CONF,NOT SUPPORTED BLOCK,BAD MSX FW CONF,NOT FW CONF,DEVICE MISSING,Device not in this core build,No CRC32 DB,Not find CRC32 in DB,SMALL MEMORY,FDC already in machine,ROM too big,",
+   // 13-24: mode reported by the MT32-pi (midi_port INFO_BASE)
+   "MT32-pi: SoundFont #0,MT32-pi: SoundFont #1,MT32-pi: SoundFont #2,MT32-pi: SoundFont #3,",
+   "MT32-pi: SoundFont #4,MT32-pi: SoundFont #5,MT32-pi: SoundFont #6,MT32-pi: SoundFont #7,",
+   "MT32-pi: MT-32 v1,MT32-pi: MT-32 v2,MT32-pi: CM-32L,MT32-pi: Unknown mode;",
    "V,v",`BUILD_DATE
 };
 
@@ -387,9 +274,10 @@ wire             forced_scandoubler;
 wire      [21:0] gamma_bus;
 wire       [1:0] buttons;
 wire     [127:0] status;
-wire      [15:0] status_menumask;
-wire             info_req;
-wire       [7:0] info;
+wire      [15:0] sys_menumask;
+wire             sys_info_req, mt32_info_req;
+wire       [7:0] sys_info, mt32_info;
+wire             mt32_available, mt32_newmode;
 wire      [10:0] ps2_key;
 wire      [24:0] ps2_mouse;
 // [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: joydb joystick composition
@@ -417,6 +305,7 @@ wire             img_readonly;
 wire      [15:0] sdram_sz;
 wire      [64:0] rtc;
 wire      [31:0] uart_speed;
+wire       [7:0] uart_mode;
 
 hps_io #(.CONF_STR(CONF_STR),.VDNUM(VDNUM)) hps_io
 (
@@ -427,7 +316,7 @@ hps_io #(.CONF_STR(CONF_STR),.VDNUM(VDNUM)) hps_io
    .forced_scandoubler(forced_scandoubler),
    .buttons(buttons),
    .status(status),
-   .status_menumask(status_menumask),
+   .status_menumask({sys_menumask[15], mt32_newmode, mt32_available, sys_menumask[12:0]}),
    .ps2_key(ps2_key),
    .ps2_mouse(ps2_mouse),
    // [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: joydb joystick + joy_raw
@@ -461,8 +350,9 @@ hps_io #(.CONF_STR(CONF_STR),.VDNUM(VDNUM)) hps_io
    .sd_buff_wr(sd_buff_wr),
    .sdram_sz(sdram_sz),
    .RTC(rtc),
-   .info_req(info_req),
-   .info(info),
+   .info_req(sys_info_req | mt32_info_req),      // a machine error has priority
+   .info(sys_info_req ? sys_info : mt32_info),
+   .uart_mode(uart_mode),
    .uart_speed(uart_speed)
 );
 
@@ -493,18 +383,24 @@ blockDevMux #(.VDNUM(VDNUM)) blockDevMux
 );
 
 /////////////////   MSX SYSTEM   /////////////////
-MSX::video_t     video_bus;
+MSX::video_t     video_core, video_bus;
+wire      [15:0] core_audio_l, core_audio_r;
+wire             midi_tx, midi_rx;
+wire      [31:0] midi_rx_speed;
 ext_sd_card_if   ext_SD_card_bus();
 memory_bus_if    memory_bus_sdram_ch1();
 memory_bus_if    memory_bus_sdram_ch2();
 memory_bus_if    memory_bus_sdram_ch3();
 wave_bus_if      wave_bus_sdram_ch4();
-wire             cpu_phase;
+wire             cpu_phase_next;
+wire             pause;
 wire       [5:0] joy[2];
+
+// paused machine: the scaler keeps the last frame (HDMI only, the OSD is drawn after it)
+assign HDMI_FREEZE = pause;
 wire             tape_in;
 wire      [27:0] ddr3_addr;
 wire       [7:0] ddr3_dout;
-wire      [63:0] ddr3_dout64;
 wire             ddr3_rd, ddr3_ready;
 
 assign joy[0] = joy0[5:0];
@@ -516,9 +412,9 @@ msx_system msx_system
    .rst_core_async(rst_core_async),
    .reset(reset),
    .status(status),
-   .status_menumask(status_menumask),
-   .info_req(info_req),
-   .info(info),
+   .status_menumask(sys_menumask),
+   .info_req(sys_info_req),
+   .info(sys_info),
    .ps2_key(ps2_key),
    .ps2_mouse(ps2_mouse),
    .joy(joy),
@@ -527,30 +423,73 @@ msx_system msx_system
    .ioctl_addr(ioctl_addr),
    .rtc(rtc),
    .sdram_sz(sdram_sz),
-   .uart_speed(uart_speed),
+   .uart_speed(midi_rx_speed),
    .img_readonly(img_readonly),
    .img_size(img_size),
    .sd_img_mounted(block_device_SD.img_mounted),
+   .osd_status(OSD_STATUS),
    .block_device_FDD(block_device_FDD),
    .msx_config(msx_config),
-   .video_bus(video_bus),
-   .audio_L(AUDIO_L),
-   .audio_R(AUDIO_R),
+   .video_bus(video_core),
+   .audio_L(core_audio_l),
+   .audio_R(core_audio_r),
    .led_turbo(led_turbo),
    .led_pause(led_pause),
-   .uart_rxd(UART_RXD),
+   .pause(pause),
+   .uart_rxd(midi_rx),
+   .uart_txd(midi_tx),
    .tape_adc(tape_in),
    .ext_SD_card_bus(ext_SD_card_bus),
    .memory_bus_sdram_ch1(memory_bus_sdram_ch1),
    .memory_bus_sdram_ch2(memory_bus_sdram_ch2),
    .memory_bus_sdram_ch3(memory_bus_sdram_ch3),
    .wave_bus_sdram_ch4(wave_bus_sdram_ch4),
-   .cpu_phase(cpu_phase),
+   .cpu_phase(),
+   .cpu_phase_next(cpu_phase_next),
    .ddr3_addr(ddr3_addr),
    .ddr3_rd(ddr3_rd),
    .ddr3_dout(ddr3_dout),
-   .ddr3_dout64(ddr3_dout64),
    .ddr3_ready(ddr3_ready)
+);
+
+/////////////////   MIDI, MT32-pi   /////////////////
+// MIDI of the machine (YM2148, MSX-MIDI) to the HPS UART and the user port; audio and LCD
+// of the MT32-pi into the sound and the picture
+midi_port midi_port
+(
+   .clk(clock_bus.clk),
+   .reset(reset),
+   .CLK_AUDIO(CLK_AUDIO),
+   .port_mode(status[44:43]),
+   .mt32_disable(status[45]),
+   .mt32_info(status[47:46]),
+   .mt32_mode_req(status[48]),
+   .mt32_rom_req(status[50:49]),
+   .mt32_sf_req(status[53:51]),
+   .mt32_reset_req(status[54]),
+   .mt32_available(mt32_available),
+   .mt32_newmode(mt32_newmode),
+   .info_req(mt32_info_req),
+   .info(mt32_info),
+   .uart_mode(uart_mode),
+   .uart_speed(uart_speed),
+   .UART_RXD(UART_RXD),
+   .UART_TXD(UART_TXD),
+   // [MiSTer-DB9 BEGIN] - feed midi_port the Gate-1-masked USER_IN and a private
+   // USER_OUT; the DB9-or-midi USER_OUT compose above is the single driver.
+   .USER_IN(USER_IN_MT32),
+   .USER_OUT(USER_OUT_MT32),
+   // [MiSTer-DB9 END]
+   .midi_tx(midi_tx),
+   .midi_rx(midi_rx),
+   .midi_rx_speed(midi_rx_speed),
+   .pause(pause),
+   .core_audio_l(core_audio_l),
+   .core_audio_r(core_audio_r),
+   .audio_l(AUDIO_L),
+   .audio_r(AUDIO_R),
+   .video_in(video_core),
+   .video_out(video_bus)
 );
 
 /////////////////   SD CARD   /////////////////
@@ -562,7 +501,9 @@ wire vsdmiso;
 wire sdmiso = vsd_sel ? vsdmiso : SD_MISO;
 
 logic vsd_sel = 0;
-always_ff @(posedge clock_bus.clk) if(block_device_SD.img_mounted) vsd_sel <= |img_size; //TODO je potřeba hlídat náběžnou hranu img mounted
+// img_mounted is a level for the rest of the HPS transaction, img_size comes in an earlier
+// one and stays stable: no edge detection needed (doc/top-level.md)
+always_ff @(posedge clock_bus.clk) if(block_device_SD.img_mounted) vsd_sel <= |img_size;
 
 assign SD_CS   = vsd_sel;
 assign SD_SCK  = sdclk  & ~vsd_sel;
@@ -585,7 +526,7 @@ always_ff @(posedge clock_bus.clk) begin
     if((old_mosi ^ sdmosi) || (old_miso ^ sdmiso)) timeout <= 0;
 end
 
-// turbo R: R800 on the user LED, pause on the disk LED (VHD / SD activity otherwise)
+// turbo R: R800 on the user LED; machine pause / turbo R pause LED on the disk LED (VHD / SD activity otherwise)
 wire   led_turbo, led_pause;
 assign LED_USER = (vsd_sel & sd_act) | led_turbo;
 assign LED_DISK = {1'b1, (~vsd_sel & sd_act) | led_pause};
@@ -723,7 +664,7 @@ ddram buffer
    .we(),
    .rd(ddr3_rd),
    .ready(ddr3_ready),
-   .dout64(ddr3_dout64)
+   .dout64()
 );
 
 /////////////////   SDRAM   /////////////////
@@ -770,7 +711,7 @@ sdram sdram
    .ch4_req  (wave_bus_sdram_ch4.req),
    .ch4_rnw  (~wave_bus_sdram_ch4.we),
    .ch4_done (wave_bus_sdram_ch4.ack),
-   .cpu_phase(cpu_phase)
+   .cpu_phase_next(cpu_phase_next)
 );
 
 endmodule

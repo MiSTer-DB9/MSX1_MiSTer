@@ -1,12 +1,14 @@
 // memory_upload: loads an MSX pack (createComp.py output) from a DDR3 model through
 // ddram, prints the resulting tables and checks the OCM configuration
 // (tools/CreateMSXpack/Computer/OCM/1chipMSX.xml).
-// Optional FW pack (createDev.py output, DDR 300000h) and cartridge type of slot 2:
-// +fw=<CART_FW_EN.msx> +cartb=<cart_typ_t>.
+// Optional FW pack (createDev.py output, DDR MSX::DDR3_FW_PACK) and cartridge type of slot 2:
+// +fw=<CART_FW_EN.msx> +cartb=<cart_typ_t>. +shared0: the pack has an extra 16 kB
+// <shared_memory offset="0"> of the ESE-RAM (3-2 block 1) in slot 0-1 page 2.
 // OCM has no cartridge slots: slots 1 and 2 hold the internal ESE-SCC / MegaRAM (machine
 // blocks, pages 1-2, 1 MB / 2 MB RAM, mapper MEGARAM, own SCC), independent of FW and cartb.
 // Run: wsl.exe -- bash rtl/tb/run_memory_upload.sh <pack.msx> <ocm_iplrom.rom> [fw.msx cartb]
 module memory_upload_tb;
+localparam int unsigned FW_BASE = MSX::DDR3_FW_PACK, DB_BASE = MSX::DDR3_DB;   // DDR3 areas
 
 logic clk = 0;
 always #1 clk = ~clk;
@@ -46,7 +48,7 @@ always_ff @(posedge clk) begin
         for (int b = 0; b < 8; b++) begin
             int unsigned a = {rd_addr[24:0], 3'(b)};
             DDRAM_DOUT[8*b +: 8] <= (a < pack.size()) ? pack[a] :
-                                    (a >= 32'h300000 && a - 32'h300000 < fw.size()) ? fw[a - 32'h300000] : 8'hFF;
+                                    (a >= FW_BASE && a - FW_BASE < fw.size()) ? fw[a - FW_BASE] : 8'hFF;
         end
         DDRAM_DOUT_READY <= 1'b1;
         rd_wait <= -1;
@@ -177,7 +179,7 @@ initial begin
     if (fw.size() > 0) begin
         ioctl_index = 16'd2; ioctl_download = 1;
         @(posedge clk); ioctl_addr = 27'(fw.size());
-        @(posedge clk); ioctl_download = 0;
+        @(posedge clk); ioctl_download = 0; ioctl_addr = ioctl_addr + 1'd1;   // hps_io: +1 at the end
         wait (upload);
         wait (!upload);
         repeat (10) @(posedge clk);
@@ -186,7 +188,7 @@ initial begin
     // HPS download of the MSX pack (index 1)
     ioctl_index = 16'd1; ioctl_download = 1;
     @(posedge clk); ioctl_addr = 27'(pack.size());
-    @(posedge clk); ioctl_download = 0;
+    @(posedge clk); ioctl_download = 0; ioctl_addr = ioctl_addr + 1'd1;   // hps_io: +1 at the end
     wait (upload);
     wait (!upload);
     repeat (10) @(posedge clk);
@@ -225,6 +227,8 @@ initial begin
     for (int p = 0; p < 2; p++) expect_page("MAIN", 0, 0, p, MAPPER_OFFSET, ese + 32'h20000 + p * 16384, 1'b1);
     expect_page("OPLL ROM", 0, 2, 1, MAPPER_OFFSET, ese + 32'h2C000, 1'b1);
     expect_page("FREE ROM", 0, 3, 1, MAPPER_OFFSET, ese + 32'h3C000, 1'b1);
+    // +shared0: a pack with an extra <shared_memory offset="0"> of the ESE-RAM in 0-1 page 2
+    if ($test$plusargs("shared0")) expect_page("shared_memory offset 0", 0, 1, 2, MAPPER_OFFSET, ese, 1'b1);
     // ESE-RAM (512 kB) must not overlap the 4 MB mapper RAM
     if (!(ese + 32'h80000 <= page_addr(3, 0, 0) || page_addr(3, 0, 0) + 32'h400000 <= ese)) begin
         errors++; $display("FAIL ESE-RAM %07h overlaps RAM mapper %07h", ese, page_addr(3, 0, 0));
