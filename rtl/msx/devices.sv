@@ -37,6 +37,7 @@ module devices  #(parameter sysCLK)
     input            [64:0] rtc_time,
     input             [7:0] uart_rx_data,
     input                   uart_rx,
+    output                  uart_tx,                                // MIDI out (YM2148, MSX-MIDI)
     output    signed [15:0] sound_L,                                // Mixed and clipped audio (sound_mix)
     output    signed [15:0] sound_R,
     output            [7:0] data,                                   // Combined data output
@@ -50,19 +51,20 @@ module devices  #(parameter sysCLK)
     output                  keybeep,
     output                  reset_lock,
     output                  reset_request,
-    output MSX::cpu_speed_t cpu_speed,              // OCM turbo, '0 without OCM
+    output MSX::cpu_speed_t cpu_speed,              // OCM / Matsushita / CIEL turbo, '0 without them
     output                  opll_wait,              // CPU wait: OPLL busy (turbo)
     output                  opl4_wait,              // CPU wait: OPL4 wave part busy
     output                  turbor_r800,            // S1990: R800 selected
     output                  turbor_dram,            // S1990: DRAM mode (ROM read from the main RAM)
     output                  pause,                  // hold the CPU: machine pause or turbo R hardware pause
     output                  pause_led,
-    output                  turbor_turbo_led,
+    output                  turbor_turbo_led,       // R800 running (turbo R) or the machine turbo on
     input                   ocm_mmc_on,
     output                  ocm_megaSD_enable,
     output                  ocm_slot1_mode,
     output [1:0]            ocm_slot2_mode,
-    output                  ocm_ipl_en              // OCM IPL ROM visible (before BIOS load)
+    output                  ocm_ipl_en,             // OCM IPL ROM visible (before BIOS load)
+    output                  ocm_slot0_mode          // OCM: 1 = slot 0 expanded (1 without OCM)
 );
 
     MSX::video_t            video_bus_tms, video_bus_v99;
@@ -70,7 +72,7 @@ module devices  #(parameter sysCLK)
     vram_bus_if             vram_bus_v99();
 
     // Výstupy kombinující jednotlivé zařízení
-    assign data = scc_data & fdc_data & msx2_ram_data & tms_data & v99_data & rtc_data & psg_data & ppi_data & ocm_data & reset_status_data & opm_data & ym2148_data & systimer_data & s1990_data & turbor_pcm_data & turbor_pause_data & opl4_data;
+    assign data = scc_data & fdc_data & msx2_ram_data & tms_data & v99_data & rtc_data & psg_data & ppi_data & ocm_data & reset_status_data & opm_data & ym2148_data & msx_midi_data & systimer_data & s1990_data & turbor_pcm_data & turbor_pause_data & opl4_data & matsushita_data & ciel_turbo_data;
     assign data_oe_rq = fdc_data_oe_rq;// | TC8566AF_data_oe_rq;
     assign data_to_mapper = msx2_ram_data_to_mapper & latch_port_data_to_mapper;
 
@@ -84,7 +86,7 @@ module devices  #(parameter sysCLK)
     assign memory_bus.rnw     = '1;
 
     // VIDEO interfaces
-    assign cpu_interrupt     = tms_interrupt | v99_interrupt | opm_irq | ym2148_irq | opl4_irq;
+    assign cpu_interrupt     = tms_interrupt | v99_interrupt | opm_irq | ym2148_irq | msx_midi_irq | opl4_irq;
 
     assign video_bus         = video_bus_tms | video_bus_v99;     // only the enabled VDP drives
 
@@ -108,6 +110,7 @@ module devices  #(parameter sysCLK)
         .clock_bus(clock_bus),
         .io_device(io_device[DEV_OPLL]),
         .enawait(cpu_speed.en && cpu_speed.clock_sel != 2'b00),
+        .machine_io_en(ocm_slot0_mode),
         .wait_rq(opll_wait),
         .sound(opll_sound)
     );
@@ -142,7 +145,7 @@ module devices  #(parameter sysCLK)
     );
 
     wire         [7:0] ym2148_data;
-    wire               ym2148_irq;
+    wire               ym2148_irq, ym2148_tx;
     dev_YM2148 ym2148 (
         .cpu_bus(cpu_bus),
         .device_bus(device_bus),
@@ -151,8 +154,22 @@ module devices  #(parameter sysCLK)
         .io_device(io_device[DEV_YM2148]),
         .uart_rx_data(uart_rx_data),
         .uart_rx(uart_rx),
-        .data(ym2148_data)
+        .data(ym2148_data),
+        .tx(ym2148_tx)
     );
+
+    wire         [7:0] msx_midi_data;
+    wire               msx_midi_irq, msx_midi_tx;
+    dev_msx_midi msx_midi (
+        .cpu_bus(cpu_bus),
+        .io_device(io_device[DEV_MSX_MIDI]),
+        .uart_rx(uart_rx),
+        .uart_rx_data(uart_rx_data),
+        .data(msx_midi_data),
+        .irq(msx_midi_irq),
+        .tx(msx_midi_tx)
+    );
+    assign uart_tx = ym2148_tx & msx_midi_tx;             // both idle high
 
     wire [7:0] scc_data;
     MSX::sound_t scc_sound;
@@ -219,7 +236,7 @@ module devices  #(parameter sysCLK)
         .ff_dip_req(msx_user_config.ocm_dip),
         .ps2_key(ps2_key),
         .mmc_on(ocm_mmc_on),
-        .cpu_speed(cpu_speed),
+        .cpu_speed(ocm_speed),
         .data(ocm_data),
         .ipl_en(ocm_ipl_en),
         .jis2_en(ocm_jis2_en),
@@ -228,8 +245,30 @@ module devices  #(parameter sysCLK)
         .Slot1Mode(ocm_slot1_mode),
         .Slot2Mode(ocm_slot2_mode),
         .rst_key_lock(ocm_reset_lock),
-        .swio_reset(ocm_reset_request)
+        .swio_reset(ocm_reset_request),
+        .Slot0Mode(ocm_slot0_mode)
     );
+
+    // Turbo of the machine: OCM, Matsushita switched I/O (5.37 MHz) or CIEL (7.16 MHz)
+    MSX::cpu_speed_t ocm_speed, matsushita_speed, ciel_speed;
+    wire  [7:0] matsushita_data, ciel_turbo_data;
+    dev_matsushita dev_matsushita (
+        .cpu_bus(cpu_bus),
+        .io_device(io_device[DEV_MATSUSHITA]),
+        .hard_reset(hard_reset),
+        .firmware_sw(msx_user_config.firmware_sw),
+        .data(matsushita_data),
+        .cpu_speed(matsushita_speed)
+    );
+    dev_ciel_turbo dev_ciel_turbo (
+        .cpu_bus(cpu_bus),
+        .io_device(io_device[DEV_CIEL_TURBO]),
+        .data(ciel_turbo_data),
+        .cpu_speed(ciel_speed)
+    );
+    assign cpu_speed = ocm_speed.en        ? ocm_speed        :
+                       matsushita_speed.en ? matsushita_speed : ciel_speed;
+    wire machine_turbo_led = (matsushita_speed.en || ciel_speed.en) && cpu_speed.clock_sel != 2'b00;
 
     wire  [7:0] tms_data;
     wire        tms_interrupt;
@@ -303,13 +342,14 @@ module devices  #(parameter sysCLK)
     // Turbo R: S1990 (E4h / E5h), PCM (A4h / A5h), pause (A7h); the firmware switch is an OSD
     // option, the pause key the PS/2 Pause key (doc/turboR.md)
     wire [7:0] s1990_data, turbor_pcm_data, turbor_pause_data;
-    wire       turbor_mute, turbor_hw_pause, turbor_pause_led;
+    wire       turbor_mute, turbor_hw_pause, turbor_pause_led, turbor_led;
+    assign     turbor_turbo_led = turbor_led || machine_turbo_led;
     wire       pause_key;                           // Pause key state (dev_ppi, keyboard.sv)
     MSX::sound_t turbor_pcm_sound;
     dev_s1990 dev_s1990 (
         .cpu_bus(cpu_bus),
         .io_device(io_device[DEV_S1990]),
-        .firmware_sw(msx_user_config.turbor_firmware),
+        .firmware_sw(msx_user_config.firmware_sw),
         .data(s1990_data),
         .r800(turbor_r800),
         .dram(turbor_dram)
@@ -328,7 +368,7 @@ module devices  #(parameter sysCLK)
         .data(turbor_pause_data),
         .hw_pause(turbor_hw_pause),
         .pause_led(turbor_pause_led),
-        .turbo_led(turbor_turbo_led)
+        .turbo_led(turbor_led)
     );
 
     // Machine pause (doc/pauza.md): the open OSD with "Pause when OSD open", or the Pause key

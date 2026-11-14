@@ -18,10 +18,10 @@
 // Generic cartridge slots are hidden for OCM (H3), which has its own slot options (MSX_MiSTer).
 // An FDC cartridge only in slot A (MSX::N_FDC).
 parameter CONF_STR_SLOT_A = {
-    "H3O[20:17],Slot1,ROM,FDC,SCC,SCC+,FM-PAC,MegaSCC+ 1MB, MegaFlashROM SCC+ SD,GameMaster2,Empty,MoonSound;"
+    "H3O[20:17],Slot1,ROM,FDC,SCC,SCC+,FM-PAC,MegaSCC+ 1MB, MegaFlashROM SCC+ SD,GameMaster2,Empty,MoonSound,MSX-MIDI;"
 };
 parameter CONF_STR_SLOT_B = {
-    "H3O[32:29],Slot2,ROM,SCC,SCC+,FM-PAC,MegaSCC+ 2MB,MegaRAM ASCII-8K 1MB,MegaRAM ASCII-16K 2MB,Empty,MoonSound;"
+    "H3O[32:29],Slot2,ROM,SCC,SCC+,FM-PAC,MegaSCC+ 2MB,MegaRAM ASCII-8K 1MB,MegaRAM ASCII-16K 2MB,Empty,MoonSound,MSX-MIDI;"
 };
 parameter CONF_STR_OCM_SLOTS = {
     "h3O[22],Slot1,Empty,MegaSCC+ 1MB;",
@@ -58,6 +58,7 @@ wire [3:0] slot_B_select   = HPS_status[32:29];
             4'd6: cart_conf[0].typ = CART_TYP_MFRSD;
             4'd7: cart_conf[0].typ = CART_TYP_GM2;
             4'd9: cart_conf[0].typ = CART_TYP_MOONSOUND;
+            4'd10: cart_conf[0].typ = CART_TYP_MSX_MIDI;
             default: cart_conf[0].typ = CART_TYP_EMPTY;
         endcase
     end
@@ -73,6 +74,7 @@ wire [3:0] slot_B_select   = HPS_status[32:29];
             4'd5: cart_conf[1].typ = CART_MEGA_ASCII_8;
             4'd6: cart_conf[1].typ = CART_MEGA_ASCII_16;
             4'd8: cart_conf[1].typ = CART_TYP_MOONSOUND;
+            4'd9: cart_conf[1].typ = CART_TYP_MSX_MIDI;
             default: cart_conf[1].typ = CART_TYP_EMPTY;
         endcase
     end
@@ -89,7 +91,7 @@ assign msx_user_config.mouse_port            = HPS_status[14];
 // (Slot2Mode = {bit 4, bit 5}), 3 slot 1 option, 2:1 display (11), 0 turbo
 assign msx_user_config.ocm_dip  = {1'b1, HPS_status[11], HPS_status[24:23], HPS_status[22], 2'b11, HPS_status[15]};
 assign msx_user_config.ocm_r800 = ocmMode && HPS_status[16];
-assign msx_user_config.turbor_firmware = HPS_status[26];
+assign msx_user_config.firmware_sw = HPS_status[26];
 
 logic [1:0] osd_sync = '0;
 always_ff @(posedge clk) osd_sync <= {osd_sync[0], osd_status};

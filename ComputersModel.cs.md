@@ -4,17 +4,17 @@
 
 Zpět na [Readme](Readme.cs.md).
 
-Jádro není svázáno s jedním počítačem: každý stroj níže je definice (soubor XML v `tools/CreateMSXpack/Computer/`), která se převede na ROM PACK (`.msx`). Je zde **224 definic** od 36 výrobců:
+Jádro není svázáno s jedním počítačem: každý stroj níže je definice (soubor XML v `tools/CreateMSXpack/Computer/`), která se převede na ROM PACK (`.msx`). Je zde **225 definic** od 36 výrobců:
 
 | Generace | Počet |
 |---|---|
 | MSX1 | 135 (124 s VDP TMS99xx, 11 s V9938 a BIOSem MSX1) |
 | MSX2 | 80 |
 | MSX2+ | 7 |
-| MSX turbo R | 1 |
+| MSX turbo R | 2 |
 | 1chipMSX / OCM (třída MSX2+) | 1 |
 
-158 z nich přibylo v listopadu 2026 převodem popisů strojů z openMSX (`share/machines`).
+159 z nich přibylo v listopadu 2026 převodem popisů strojů z openMSX (`share/machines`).
 Stroje, které potřebují hardware, jaký jádro nemá, jsou na konci.
 
 **Obrazy ROM nejsou součástí.** ROM si dodáte sami a balíčky si sestavíte nástrojem [CreateMSXpack](tools/CreateMSXpack/README.cs.md) (viz též [Nástroje](tools/README.cs.md)). Bez vlastních ROM lze sestavit jen oba stroje C-BIOS a 1chipMSX. **1chipMSX** navíc potřebuje `OCM-BIOS.DAT` jako první soubor v obrazu SD karty (VHD) s FAT16.
@@ -50,7 +50,7 @@ Poznámky k tabulkám:
 ## CIEL (Brazílie)
 | Model | Gen. | Popis | Klíčový vestavěný hardware |
 |---|---|---|---|
-| Expert Turbo | MSX2+ | Brazilská amatérská základní deska MSX2+ do skříně Gradiente Expert. | V9958, mapper 1024 KB, RTC, MSX-MUSIC, 3 sloty pro cartridge (v jádře 2), chybí: turbo 7,16 MHz |
+| Expert Turbo | MSX2+ | Brazilská amatérská základní deska MSX2+ do skříně Gradiente Expert. | V9958, mapper 1024 KB, RTC, MSX-MUSIC, 3 sloty pro cartridge (v jádře 2), turbo 7,16 MHz |
 
 ## Canon
 | Model | Gen. | Popis | Klíčový vestavěný hardware |
@@ -71,7 +71,7 @@ Poznámky k tabulkám:
 | [MX-10](https://www.msx.org/wiki/Casio_MX-10) | MSX1 | Levný japonský herní MSX1 s tlačítky joysticku. | 16 KB RAM |
 | [MX-15](https://www.msx.org/wiki/Casio_MX-15) | MSX1 | Evropská verze MX-10. | 16 KB RAM |
 | [PV-16](https://www.msx.org/wiki/Casio_PV-16) | MSX1 | Levný japonský herní MSX1. | 16 KB RAM |
-| [PV-7](https://www.msx.org/wiki/Casio_PV-7) | MSX1 | Velmi levný japonský MSX1 (skutečný stroj má 8 KB RAM, definice mu dává 16 KB). | 16 KB RAM |
+| [PV-7](https://www.msx.org/wiki/Casio_PV-7) | MSX1 | Velmi levný japonský MSX1. | 8 KB RAM |
 
 ## Daewoo
 | Model | Gen. | Popis | Klíčový vestavěný hardware |
@@ -168,9 +168,9 @@ Poznámky k tabulkám:
 | CF-3300 | MSX1 | Japonský stolní MSX1 s vestavěnou disketovou mechanikou. | 64 KB RAM, FDC + 1 mechanika |
 | FS-1300 | MSX1 | Základní japonský MSX1. | 64 KB RAM |
 | FS-4000 | MSX1 | Japonský MSX1 pro psaní textů s vestavěným softwarem (vestavěná tiskárna se neemuluje). | 64 KB RAM, Kanji ROM, ROM MSX Word |
-| FS-4500 | MSX2 | Japonský MSX2 pro psaní textů s vestavěným softwarem (vestavěná tiskárna se neemuluje). | 64 KB RAM, RTC, Kanji ROM, ROM Word Font, MSX Jusho, MSX Word 1, MSX Word 2, chybí: SRAM firmwaru, Bunsetsu |
+| FS-4500 | MSX2 | Japonský MSX2 pro psaní textů s vestavěným softwarem (vestavěná tiskárna se neemuluje). | 64 KB RAM, RTC, Kanji ROM, ROM Word Font, MSX Jusho, MSX Word 1, MSX Word 2, SRAM firmwaru (neukládá se), chybí: Bunsetsu |
 | [FS-4600F](https://www.msx.org/wiki/National_FS-4600F) | MSX2 | Japonský MSX2 pro zpracování textu s vestavěným softwarem, kanji a disketovou mechanikou (vestavěná tiskárna není emulována). | mapper 128 KB, RTC, Kanji ROM, MSX-Word, FDC + 1 mechanika |
-| FS-4700F | MSX2 | FS-4500 s vestavěnou disketovou mechanikou (vestavěná tiskárna se neemuluje). | 64 KB RAM, RTC, Kanji ROM, FDC + 1 mechanika, ROM Word Font, MSX Jusho, MSX Word 1, MSX Word 2, chybí: SRAM firmwaru, Bunsetsu |
+| FS-4700F | MSX2 | FS-4500 s vestavěnou disketovou mechanikou (vestavěná tiskárna se neemuluje). | 64 KB RAM, RTC, Kanji ROM, FDC + 1 mechanika, ROM Word Font, MSX Jusho, MSX Word 1, MSX Word 2, SRAM firmwaru (neukládá se), chybí: Bunsetsu |
 | FS-5000F2 | MSX2 | Japonský stolní MSX2 se dvěma mechanikami. | mapper 128 KB, RTC, Kanji ROM, FDC + 2 mechaniky, ROM Set-Up RTC |
 | FS-5500F1 | MSX2 | Japonský stolní MSX2 s jednou mechanikou (superimpose a digitalizace se neemulují). | 64 KB RAM, RTC, Kanji ROM, FDC + 1 mechanika, ROM Super Impose |
 | FS-5500F2 | MSX2 | Vlajková loď National, MSX2 se dvěma mechanikami (superimpose a digitalizace se neemulují). | 64 KB RAM, RTC, Kanji ROM, FDC + 2 mechaniky, ROM Super Impose |
@@ -197,11 +197,12 @@ Poznámky k tabulkám:
 | CF-2700 (GB) | MSX1 | Základní britský MSX1, jeden z mála evropských MSX od Panasonicu. | 64 KB RAM |
 | [FS-A1](https://www.msx.org/wiki/Panasonic_FS-A1) | MSX2 | Základní japonský MSX2 s vestavěným softwarem DESKPAC. | mapper 64 KB, RTC |
 | [FS-A1F](https://www.msx.org/wiki/Panasonic_FS-A1F) | MSX2 | FS-A1mkII s vestavěnou disketovou mechanikou a softwarem. | mapper 64 KB, RTC, Kanji ROM, FDC TC8566AF + 1 mechanika |
-| FS-A1FX | MSX2+ | Japonský MSX2+ s disketovou mechanikou a vestavěným softwarem, bez MSX-MUSIC. | V9958, mapper 64 KB, RTC, Kanji ROM, FDC TC8566AF + 1 mechanika, ROM A1 Cockpit, chybí: turbo 5,37 MHz a SRAM firmwaru |
+| FS-A1FX | MSX2+ | Japonský MSX2+ s disketovou mechanikou a vestavěným softwarem, bez MSX-MUSIC. | V9958, mapper 64 KB, RTC, Kanji ROM, FDC TC8566AF + 1 mechanika, ROM A1 Cockpit, turbo 5,37 MHz, SRAM firmwaru (neukládá se) |
 | FS-A1MK2 | MSX2 | Základní japonský MSX2, FS-A1 s numerickou klávesnicí. | 64 KB RAM, RTC, ROM A1 Cockpit 1, A1 Cockpit 2, A1 Cockpit 3 |
-| [FS-A1ST](https://www.msx.org/wiki/Panasonic_FS-A1ST) | turbo R | První MSX turbo R: R800, MSX-MUSIC, PCM, MSX-DOS2, mechanika a software. R800 běží zhruba 2x rychleji než Z80 (viz [Readme](Readme.cs.md#známá-omezení)). | V9958, 256 KB RAM, R800/S1990, MSX-MUSIC, PCM, RTC, Kanji ROM, FDC TC8566AF + 1 mechanika |
-| FS-A1WSX | MSX2+ | Nástupce FS-A1WX: MSX2+ s MSX-MUSIC, disketovou mechanikou a vestavěným softwarem. | V9958, mapper 64 KB, RTC, MSX-MUSIC, Kanji ROM, FDC TC8566AF + 1 mechanika, ROM firmware, chybí: turbo 5,37 MHz a SRAM firmwaru |
-| FS-A1WX | MSX2+ | Japonský MSX2+ s MSX-MUSIC, disketovou mechanikou a vestavěným softwarem. | V9958, mapper 64 KB, RTC, MSX-MUSIC, Kanji ROM, FDC TC8566AF + 1 mechanika, ROM firmware, chybí: turbo 5,37 MHz a SRAM firmwaru |
+| [FS-A1ST](https://www.msx.org/wiki/Panasonic_FS-A1ST) | turbo R | První MSX turbo R: R800, MSX-MUSIC, PCM, MSX-DOS2, mechanika a software. R800 běží zhruba 3x rychleji než Z80 (viz [Readme](Readme.cs.md#známá-omezení)). | V9958, 256 KB RAM, R800/S1990, MSX-MUSIC, PCM, RTC, Kanji ROM, FDC TC8566AF + 1 mechanika |
+| [FS-A1GT](https://www.msx.org/wiki/Panasonic_FS-A1GT) | turbo R | Poslední MSX turbo R: FS-A1ST s 512 KB RAM, MSX-MIDI a dalším vestavěným softwarem (MSX-View). R800 běží zhruba 3x rychleji než Z80 (viz [Readme](Readme.cs.md#známá-omezení)). | V9958, 512 KB RAM, R800/S1990, MSX-MUSIC, PCM, MSX-MIDI, RTC, Kanji ROM, FDC TC8566AF + 1 mechanika, neemulováno: SRAM firmwaru |
+| FS-A1WSX | MSX2+ | Nástupce FS-A1WX: MSX2+ s MSX-MUSIC, disketovou mechanikou a vestavěným softwarem. | V9958, mapper 64 KB, RTC, MSX-MUSIC, Kanji ROM, FDC TC8566AF + 1 mechanika, ROM firmware, turbo 5,37 MHz, SRAM firmwaru (neukládá se) |
+| FS-A1WX | MSX2+ | Japonský MSX2+ s MSX-MUSIC, disketovou mechanikou a vestavěným softwarem. | V9958, mapper 64 KB, RTC, MSX-MUSIC, Kanji ROM, FDC TC8566AF + 1 mechanika, ROM firmware, turbo 5,37 MHz, SRAM firmwaru (neukládá se) |
 
 ## Philips
 | Model | Gen. | Popis | Klíčový vestavěný hardware |
@@ -227,7 +228,7 @@ Poznámky k tabulkám:
 | [VG 8235-39](https://www.msx.org/wiki/Philips_VG-8235) † | MSX2 | Francouzská verze VG 8235. | mapper 128 KB, RTC, FDC + 1 jednostranná mechanika |
 | VG 8235/02 | MSX2 | Německá verze VG 8235. | mapper 128 KB, RTC, FDC + 1 jednostranná mechanika |
 | VG 8235/19 | MSX2 | Francouzská verze VG 8235. | mapper 128 KB, RTC, FDC + 1 jednostranná mechanika |
-| [VG 8240](https://www.msx.org/wiki/Philips_VG-8240) | MSX2 | Nevydaný prototyp MSX2 (vyrobeno asi 15 kusů) s video superimpose. | mapper 64 KB, RTC, FDC + 1 mechanika |
+| [VG 8240](https://www.msx.org/wiki/Philips_VG-8240) | MSX2 | Nevydaný prototyp MSX2 (vyrobeno asi 15 kusů) s video superimpose. | mapper 64 KB, RTC, FDC + 1 jednostranná mechanika |
 
 ## Pioneer
 | Model | Gen. | Popis | Klíčový vestavěný hardware |
@@ -404,5 +405,4 @@ Tyto stroje z openMSX potřebují hardware, který jádro zatím nemá:
 | Victor HC-90A, HC-95A | zapojení řadiče disket Victor, systémový registr 7FFD |
 | Panasonic FS-A1FM | mappery firmwaru a modemu FS-A1FM |
 | Sony HB-F1XDJ, HB-F1XV | mapper Halnote (firmware MSX-JE) |
-| Panasonic FS-A1GT | ROM firmwaru 4 MB (formát packu unese nejvýš 4080 KB na ROM), MSX-MIDI |
 | Aucnet NIA-2001 | ROM mapper MSX-DOS2 |

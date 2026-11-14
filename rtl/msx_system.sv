@@ -50,7 +50,9 @@ module msx_system (
     output             [15:0]   audio_R,
     output                      led_turbo,              // turbo R: R800 running (pause device bit 7)
     output                      led_pause,              // machine paused, or turbo R pause LED (A7h)
+    output                      pause,                  // CPU held by a pause: freeze the HDMI picture
     input                       uart_rxd,
+    output                      uart_txd,
     input                       tape_adc,               // tape input from ADC
     ext_sd_card_if.device_mp    ext_SD_card_bus,
 
@@ -60,6 +62,7 @@ module msx_system (
     memory_bus_if.device_mp     memory_bus_sdram_ch3,
     wave_bus_if.device_mp       wave_bus_sdram_ch4,     // OPL4 sample memory
     output                      cpu_phase,              // clk in which the CPU may start a bus access
+    output                      cpu_phase_next,         // cpu_phase one clk ahead (SDRAM)
     output             [27:0]   ddr3_addr,
     output                      ddr3_rd,
     input               [7:0]   ddr3_dout,
@@ -113,7 +116,7 @@ assign status_menumask[3]     = io_device[DEV_OCM_BOOT][0].enable;
 assign status_menumask[9:4]   = msx_config.fdd[5:0];
 assign status_menumask[10]    = lookup_SRAM[0].size + lookup_SRAM[1].size + lookup_SRAM[2].size + lookup_SRAM[3].size == 0;
 assign status_menumask[11]    = msx_user_config.cas_audio_src == CAS_AUDIO_ADC || io_device[DEV_OCM_BOOT][0].enable;   // no CAS file (OCM: no tape)
-assign status_menumask[12]    = io_device[DEV_S1990][0].enable;    // turbo R options (firmware switch)
+assign status_menumask[12]    = io_device[DEV_S1990][0].enable || io_device[DEV_MATSUSHITA][0].enable;    // firmware switch
 assign status_menumask[15:13] = '0;
 
 assign info_req = error != ERR_NONE;
@@ -155,6 +158,7 @@ msx #(.sysCLK(sysCLK)) MSX
    .memory_bus(memory_bus_msx),
    .wave_bus(wave_bus),
    .cpu_phase(cpu_phase),
+   .cpu_phase_next(cpu_phase_next),
    .audio_L(audio_L),
    .audio_R(audio_R),
    .ps2_key(ps2_key),
@@ -162,6 +166,7 @@ msx #(.sysCLK(sysCLK)) MSX
    .joy(joy),
    .uart_rx_data(uart_rx_data),
    .uart_rx(uart_rx),
+   .uart_tx(uart_txd),
    .tape_motor_on(motor),
    .tape_in(msx_user_config.cas_audio_src == CAS_AUDIO_FILE ? CAS_dout : tape_adc),
    .rtc_time(rtc),
@@ -170,6 +175,7 @@ msx #(.sysCLK(sysCLK)) MSX
    .sram_load(status[39]),
    .led_turbo(led_turbo),
    .led_pause(led_pause),
+   .pause(pause),
    .ioctl_download(ioctl_download),
    .ioctl_index(ioctl_index),
    .ioctl_addr(ioctl_addr),

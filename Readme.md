@@ -10,7 +10,7 @@ The core (its MiSTer name is still `MSX1`, hence the folder `games/MSX1`) is not
 
 - **MSX1** machines (TMS9918 family VDP),
 - **MSX2** machines (Yamaha V9938, RTC, memory mapper),
-- the **MSX turbo R** Panasonic FS-A1ST (V9958, S1990, R800 mode – see [Known limitations](#known-limitations) for its speed),
+- the **MSX turbo R** Panasonic FS-A1ST and FS-A1GT (V9958, S1990, R800 mode – see [Known limitations](#known-limitations) for its speed),
 - the **1chipMSX** (OCM-PLD style, MSX2+ class, V9958), which loads its BIOS from an SD card image.
 
 For full functionality, the core also relies on an **extension module configuration** (the *FW PACK*), which includes additional ROM binaries. It is **independent of any specific MSX model**, allowing support for:
@@ -20,17 +20,17 @@ For full functionality, the core also relies on an **extension module configurat
 The third configuration file is a **CRC32-based ROM database** (the *DB MAPPERS*), which maps known ROM checksums to their correct mapper types. This allows the core to automatically select the appropriate ROM mapper for each loaded image.
 
 ## Supported MSX Models
-**[Supported MSX models](ComputersModel.md)** – 224 machine definitions from 36 manufacturers:
+**[Supported MSX models](ComputersModel.md)** – 225 machine definitions from 36 manufacturers:
 
 | Generation | Machines |
 |---|---|
 | MSX1 | 135 (124 with a TMS99xx VDP, 11 with a V9938 and an MSX1 BIOS) |
 | MSX2 | 80 |
 | MSX2+ | 7 |
-| MSX turbo R | 1 (Panasonic FS-A1ST; the FS-A1GT is not supported) |
+| MSX turbo R | 2 (Panasonic FS-A1ST, FS-A1GT) |
 | 1chipMSX / OCM (MSX2+ class) | 1 |
 
-Ten openMSX machines need hardware the core does not have yet; they are listed at the end of the model list. The ROM dumps of the machines are not part of this repository; see [Getting started](#getting-started).
+Nine openMSX machines need hardware the core does not have yet; they are listed at the end of the model list. The ROM dumps of the machines are not part of this repository; see [Getting started](#getting-started).
 
 ## Getting Started
 The core needs **at least a machine pack** (ROM PACK). Everything else depends on what you want to run. Put the files on the MiSTer SD card into `/media/fat/games/MSX1/`:
@@ -57,15 +57,15 @@ In short: install **Python 3**, put the ROM binaries into the `ROM` directory of
 The core also runs **without the SDRAM add-on board**, but only for smaller configurations. It has 256 KB of memory inside the FPGA. Everything the machine needs is stored there first: its ROMs, its RAM, then the cartridges in slots A and B. Only what does not fit goes to the SDRAM.
 
 **Works without SDRAM:**
-- **189 of the 224 machines**: almost all MSX1 machines and most MSX2 machines with 64 or 128 KB of RAM (e.g. Philips VG 8020, NMS 8245/8250, VG 8235, Sony HB-F1, HB-F9P).
+- **189 of the 225 machines**: almost all MSX1 machines and most MSX2 machines with 64 or 128 KB of RAM (e.g. Philips VG 8020, NMS 8245/8250, VG 8235, Sony HB-F1, HB-F9P).
 - Cartridges, as long as they fit into the rest of the 256 KB. The rest is about **160 KB** on a typical MSX1 (64 KB RAM) and about **64 KB** on a typical MSX2 (128 KB RAM). A cartridge takes the size of its ROM, plus its SRAM or RAM: FM-PAC 72 KB, Game Master 2 136 KB, SCC+ 128 KB.
 
 **Needs SDRAM:**
-- These 35 machines (a Kanji ROM, 256 KB or more of RAM, or large built-in software):
+- These 36 machines (a Kanji ROM, 256 KB or more of RAM, or large built-in software):
   - MSX1: National FS-4000, Sony HB-11, Al Alamiah AX230
   - MSX2: Daewoo CPC-400S, Hitachi MB-H70, Mitsubishi ML-G30 (both models), National FS-4500, FS-4600F, FS-4700F, FS-5000F2, FS-5500F1, FS-5500F2, Panasonic FS-A1F, Al Alamiah AX370, Sony HB-F700D/F/P/S, HB-F900, HB-G900AP, HB-T600, Yamaha AX350II, AX350IIF, AX500, YIS-805/256
   - MSX2+: Panasonic FS-A1FX, FS-A1WX, FS-A1WSX, Sanyo PHC-35J, PHC-70FD, PHC-70FD2, CIEL Expert Turbo
-  - MSX turbo R: Panasonic FS-A1ST; and the 1chipMSX
+  - MSX turbo R: Panasonic FS-A1ST, FS-A1GT; and the 1chipMSX
 - MoonSound, MegaFlashROM SCC+ SD, ASCII16-X, MegaRAM and MegaSCC.
 - Any ROM cartridge bigger than the free space: most MegaROM games on an MSX2, ROMs of 256 KB and more on any machine.
 
@@ -88,9 +88,10 @@ With SDRAM, a 32 MB module is enough. The largest machine (1chipMSX) needs about
 | Tape Monitor | On (default) / Off: the tape signal is heard in the sound output while the motor runs. Not shown on the 1chipMSX. |
 | Cas File (`.CAS`) | Tape image, shown when Tape Input is File. |
 | Tape Rewind | Rewinds the tape image. |
-| Firmware switch | Off / On, only on machines with the S1990 (turbo R). |
+| Firmware switch | Off / On, only on machines that have one: turbo R and the Panasonic, National and Sanyo machines with the Matsushita switched I/O. |
+| MIDI | **User Port**: MT32-pi (default; a [MT32-pi](https://github.com/dwhinham/mt32-pi) or just MIDI OUT on pin 1), MIDI In/Out (MIDI adapter: OUT on pin 1, IN on pin 0), Off. Once a MT32-pi is found, its options appear: Use MT32-pi, Show Info (No / Yes: a message when its mode changes / LCD-On / LCD-Auto: its display in the top left corner of the picture, always or for 3 s after a change), the default Synth (Munt, FluidSynth), Munt ROM, SoundFont, and Reset Hanging Notes. |
 | Video | Aspect ratio, scandoubler (None, HQ2x, CRT 25/50/75 %), Vertical Crop, Scale (Normal, V-Integer, Narrower/Wider HV-Integer, HV-Integer), Border (applies to the TMS and V99xx VDP). |
-| Pause when OSD open | No (default) / Yes: the machine stops while the OSD is open (CPU held, sound muted). |
+| Pause when OSD open | No (default) / Yes: the machine stops while the OSD is open (CPU held, sound muted, HDMI picture frozen). |
 | Reset | Reset of the machine. |
 | Reset & Detach ROM Cartridge | Clears the ROM cartridges in both slots and reloads. Not shown on the 1chipMSX. |
 | Reset and close OSD | Reset and leave the menu. |
@@ -108,7 +109,8 @@ When a load fails, the OSD info line shows one of these. After **No CRC32 DB**, 
 | NOT SUPPORTED BLOCK | The pack contains an unknown block type – the pack and the core versions do not match. |
 | BAD MSX FW CONF | The file loaded as FW PACK is not a FW pack. |
 | NOT FW CONF | The FW pack is not loaded but the selected cartridge needs it (every cartridge type, plain ROM included), or a ROM the cartridge needs is missing in the FW pack (e.g. `yrw801.rom` for MoonSound). |
-| Device not in this core build | The configuration needs more copies of a device than the core contains, e.g. FM-PAC in both slots on a machine with MSX-MUSIC, MoonSound in both slots. |
+| DEVICE MISSING | The configuration needs more copies of a device than the core contains, e.g. FM-PAC in both slots on a machine with MSX-MUSIC, MoonSound in both slots. |
+| Device not in this core build | The configuration needs a device this core build does not contain at all. |
 | No CRC32 DB | A ROM larger than 64 KB needs a mapper but no mapper database is loaded. |
 | Not find CRC32 in DB | A ROM larger than 64 KB is not in the mapper database. |
 | FDC already in machine | Two FDCs in the same position – an error of the machine definition. |
@@ -122,25 +124,28 @@ The core includes the following hardware modules:
 - `PSG` – [AY-3-8910 / YM2149 Programmable Sound Generator](https://www.msx.org/wiki/General_Instrument_AY-3-8910)
 - `VDP` – [Video Display Processor (TMS family)](https://www.msx.org/wiki/Texas_Instruments_TMS9918), PAL or NTSC per machine definition
 - `VDP` – Yamaha [V9938](https://www.msx.org/wiki/Yamaha_V9938) / [V9958](https://www.msx.org/wiki/Yamaha_V9958), 128 KB VRAM
-- `CPU` – [Z80](https://www.msx.org/wiki/Z80) at 3.58 MHz; R800 mode of the turbo R, see [Known limitations](#known-limitations)
+- `CPU` – [Z80](https://www.msx.org/wiki/Z80) at 3.58 MHz with the MSX wait state in every opcode fetch; NMOS or CMOS behaviour by the machine's [MSX-Engine](https://www.msx.org/wiki/MSX-Engine) (the T9769 also with its wait state on the VDP ports); 5.37 MHz turbo of the Panasonic FS-A1FX, FS-A1WX and FS-A1WSX, 7.16 MHz turbo of the CIEL Expert Turbo; R800 mode of the turbo R, see [Known limitations](#known-limitations)
 - `MEM_MAPPER` – MSX2 memory mapper
 - `KANJI` – [Kanji ROM](https://www.msx.org/wiki/Kanji_ROM) (levels 1 and 2; Hangul variants)
 - `FDD` – Floppy Disk Drive emulation on raw `.DSK` images (720K, 640K, 360K, 320K; disk change supported)
 - `WD2793` – [Floppy Disk Controller](https://www.msx.org/wiki/Western_Digital_WD2793), read and write including Write Track (format); a write-protected image ignores writes
 - `TC8566AF` – Toshiba floppy disk controller of the Panasonic FS-A1F and FS-A1ST, read and write
 - `OPLL` – [YM2413](https://www.msx.org/wiki/Yamaha_YM2413), [MSX-MUSIC](https://www.msx.org/wiki/MSX-MUSIC) / [FM-PAC](https://www.msx.org/wiki/FM-PAC)
-- `OPM` – [YM2151](https://www.msx.org/wiki/Yamaha_YM2151), built into the Yamaha CX5/CX11 machines
+- `OPM` – [YM2151](https://www.msx.org/wiki/Yamaha_YM2151) (SFG-01) and YM2164 (SFG-05), built into the Yamaha CX5M/CX11 and CX5MII/CX7M/AX200 machines
 - `SCC` – [Konami SCC](https://www.msx.org/wiki/Konami_SCC)
 - `SCC+` – [Konami 052539 Enhanced SCC](https://www.msx.org/wiki/Konami_052539)
 - `OPL4` – [Yamaha YMF278B](https://www.msx.org/wiki/MoonSound) (MoonSound: OPL3 FM and 24 channel wave table synthesis)
 - `DAC` – Konami Synthesizer 8-bit DAC
-- `MIDI IN` – YM2148 MIDI interface via the MiSTer UART (MIDI OUT is not supported)
+- `YM2148` – MIDI interface of the Yamaha SFG modules, MIDI IN and MIDI OUT via the MiSTer UART or the user port
+- `MSX_MIDI` – [MSX-MIDI](https://www.msx.org/wiki/MSX-MIDI) (i8251 UART + i8254 timer, I/O ports E8h–EFh), MIDI IN and MIDI OUT via the MiSTer UART or the user port
 - `SFG01` – [Yamaha SFG-01](https://www.msx.org/wiki/Yamaha_SFG-01)
 - `SFG05` – [Yamaha SFG-05](https://www.msx.org/wiki/Yamaha_SFG-05)
+- Matsushita switched I/O (Panasonic, National and Sanyo MSX2 / MSX2+): turbo switch, firmware switch, 2 KB firmware SRAM
+- CIEL Expert Turbo: turbo switch
 - turbo R: `S1990` system controller (Z80/R800 and ROM/DRAM switch, firmware switch), PCM, Pause key with LEDs, system timer; see [MSX turbo R](https://www.msx.org/wiki/MSX_turbo_R)
 - [1chipMSX](https://www.msx.org/wiki/1chipMSX): IPL ROM, switched I/O ports 40-4F, ESE-RAM, MegaSD with SD card (VHD), turbo 3.58 / 5.37 / 10.74 MHz
 
-Not implemented: MSX-AUDIO, MSX-MIDI, V9990 / GFX9000, printer, paddles, light gun, RS-232.
+Not implemented: MSX-AUDIO, V9990 / GFX9000, printer, paddles, light gun, RS-232.
 
 ## Supported ROM Mappers
 Cartridge ROMs are assigned to a mapper by the CRC32 database (`vampier.db`, 8096 entries, built by [tools/CreateCRC](tools/CreateCRC/README.md) from the [romdb.vampier.net](https://romdb.vampier.net/) dump). ROMs not in the database and up to 64 KB are placed as plain ROM (see the first rows).
@@ -191,30 +196,35 @@ The OSD offers the following types in **Slot1** and **Slot2**:
 | MegaFlashROM SCC+ SD | 1 only | [MegaFlashROM SCC+ SD](https://www.msx.org/wiki/MegaFlashROM_SCC%2B_SD); needs `mfrsd.ROM` (8 MB image) in the FW pack; SD card via **Load SD card** (VHD); flash writes are not saved |
 | Game Master 2 | 1 only | [Konami Game Master 2](https://www.msx.org/wiki/Konami_Game_Master_2); needs `GM2.ROM` in the FW pack; 8 KB SRAM (not saved) |
 | MoonSound | 1, 2 | [MoonSound](https://www.msx.org/wiki/MoonSound) (OPL4); needs `yrw801.rom` in the FW pack; only one MoonSound at a time; 4 MB SDRAM; not available on the 1chipMSX |
+| MSX-MIDI | 1, 2 | MSX-MIDI interface without a ROM (like the MIDI Interface 3), I/O ports E8h–EFh; the slot itself stays empty; only one at a time; not available on the 1chipMSX |
 
 The 1chipMSX has its own Slot1 (Empty, MegaSCC+ 1MB) and Slot2 (Empty, MegaSCC+ 2MB, MegaRAM 1MB / 2MB) options and cannot load ROMs into the slots.
 
 ## MiSTerFPGA Platform Support
 The core integrates with MiSTerFPGA and supports the following features provided by the platform:
-- `Joystick input` – two MSX joystick ports (four directions and two buttons) from the first two MiSTer joysticks; the joystick swap option exists on the 1chipMSX only
-- `Keyboard input` – PS/2 keyboard, per-machine matrix layout (`kbd_layout` in the machine definition, generated by [CreateKeyMap](tools/CreateKeyMap/README.md)); Pause key pauses the machine (CPU held, sound muted; on the turbo R the BIOS reads it from port A7h as on the real machine), F11 = turbo on the 1chipMSX
+- `Joystick input` – two MSX joystick ports (four directions and two buttons, named Fire 1 / Fire 2 in the MiSTer button mapping) from the first two MiSTer joysticks; the joystick swap option exists on the 1chipMSX only
+- `Keyboard input` – PS/2 keyboard, per-machine matrix layout (`kbd_layout` in the machine definition, generated by [CreateKeyMap](tools/CreateKeyMap/README.md)); Pause key pauses the machine (CPU held, sound muted, HDMI picture frozen; on the turbo R the BIOS reads it from port A7h as on the real machine), F11 = turbo on the 1chipMSX
 - `Mouse` – PS/2 mouse as MSX mouse, 1chipMSX only
 - `Cassette` – playback of `.CAS` files (the MSX motor must be on) or real tape through the MiSTer analog input (ADC); the tape is audible. There is no tape output.
-- `MIDI IN` – via the MiSTer UART/MIDI setting, delivered to the YM2148 of the Yamaha machines
+- `MIDI` – MIDI IN and MIDI OUT of the YM2148 (Yamaha machines) and of the MSX-MIDI, two ways out:
+  - MiSTer UART set to MIDI (31250 Bd): MidiLink sends MIDI OUT to a USB MIDI device or a software synthesizer (MUNT, FluidSynth) and brings MIDI IN from a USB MIDI device
+  - user port: a [MT32-pi](https://github.com/dwhinham/mt32-pi) (MIDI OUT; its sound is mixed into the audio output and its display can be shown over the picture) or a MIDI adapter (MIDI OUT on pin 1, MIDI IN on pin 0)
+
+  MIDI IN is taken from the user port when it is set to MIDI In/Out, from the UART otherwise. MIDI OUT goes to both; only while a MT32-pi plays and the UART is in MIDI mode, MidiLink gets nothing, so the music does not sound twice
 - `Video` – native MSX timing, PAL/NTSC per machine definition (TMS) or software (V99xx), scaling and scandoubler options
-- `LEDs` – SD/VHD activity, pause (machine paused or turbo R pause LED), turbo R turbo LED
+- `LEDs` – SD/VHD activity, pause (machine paused or turbo R pause LED), turbo LED (R800 of the turbo R, turbo of the Panasonic MSX2+ and of the CIEL Expert Turbo)
 - `SDRAM support` – optional; needed for the bigger machines and cartridges, see [Without the SDRAM module](#without-the-sdram-module)
 
 ## Known Limitations
-- **Nothing is persistent:** cartridge SRAM (FM-PAC, Game Master 2, KOEI, ASCII with SRAM), flash writes (MegaFlashROM, ASCII16-X) and the RTC CMOS are lost on reload. The **SRAM Save / SRAM Load** items do nothing. The FS-A1ST lacks the 16 KB SRAM of its Panasonic mapper.
-- **Disks:** only raw `.DSK` images (720K, 640K, 360K, 320K); no 40-track, 1.44 MB, XSA, D88, HFE or DMK. WD279x Read Track is partial. The FDC cartridge works only in slot 1 and only in machines without an FDC; there is no TC8566AF cartridge.
+- **Nothing is persistent:** cartridge SRAM (FM-PAC, Game Master 2, KOEI, ASCII with SRAM), flash writes (MegaFlashROM, ASCII16-X), the firmware SRAM of the Panasonic and National machines and the RTC CMOS are lost on reload. The **SRAM Save / SRAM Load** items do nothing. The FS-A1ST and FS-A1GT lack the SRAM of their Panasonic mapper (16 / 32 KB).
+- **Disks:** only raw `.DSK` images (720K, 640K, 360K, 320K); no 40-track, 1.44 MB, XSA, D88, HFE or DMK. The FDC cartridge works only in slot 1 and only in machines without an FDC; there is no TC8566AF cartridge.
 - **Tape:** playback only, no saving; the end of the file is not detected (garbage is played after the last block).
-- **R800:** the turbo R runs at about 2x the Z80 speed instead of the real 4x (R800 timings are not modelled); no turbo R microphone, no FS-A1GT.
+- **R800:** the R800 of the turbo R runs the Z80 cycle counts at 10.7 MHz, about 3x the Z80 speed; the real one needs fewer cycles per instruction and is faster still. I/O, multiplication and the spacing of VDP accesses take their real time. No turbo R microphone.
 - **ROMs:** a ROM over 64 KB needs an entry in the database, there is no mapper detection from the ROM header. Konami SCC ROM mirrors are not done.
 - **V99x8:** sprites in the overscan and the FH window in text modes are not done. The VDP speed and volume settings of the 1chipMSX are stored without effect.
 - **1chipMSX:** no MoonSound, no special keys PrintScreen/ScrollLock (Pause is the general machine pause).
 - **Pause:** only the CPU stops; a tape (CAS) and the floppy controllers keep running, so a pause during loading can end with a read error.
-- No MIDI OUT, no per-source volume or mute in the OSD, SCC+ deform bits 0/1 missing, no V9990.
+- No per-source volume or mute in the OSD, SCC+ deform bits 0/1 missing, no V9990.
 
 ## Acknowledgements
 - [MSX_MiSTer](https://github.com/MiSTer-devel/MSX_MiSTer) by Sorgelig – the MiSTer port of KdL's OCM-PLD and the inspiration for this core. The 1chipMSX machine was converted from it: the IPL ROM, the system I/O ports and CPU speed logic, the ESE-RAM with the MegaSD, the MegaSCC/MegaRAM and the PS/2 mouse.

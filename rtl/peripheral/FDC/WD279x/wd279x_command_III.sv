@@ -20,8 +20,8 @@
 //   Read Address (C0h): the six bytes of the next ID field go to the CPU one byte time apart,
 //     the sector register gets the track byte, CRC error as on the disk, record not found after
 //     five index pulses.
-//   Read Track (E0h): every byte the demodulator yields from index to index. It keeps its byte
-//     sync through the gaps, so only the bytes before the first mark after the index are lost.
+//   Read Track (E0h): every byte from index to index; the demodulator assembles bytes also out of
+//     sync (after a write splice) as the chip does, the marks resync it.
 //   Write Track (F0h): DRQ at once, Lost Data and end when it is not serviced before the index;
 //     then from index to index the CPU's bytes: MFM F5 = A1 (presets the CRC), F6 = C2, F7 = the
 //     two CRC bytes; FM F7 = CRC, F8-FC and FE = marks with missing clocks; a byte the CPU did not
@@ -48,7 +48,8 @@ module wd279x_command_III
 	input  logic        READYn,
 	input  logic        WPROTn,
 	input  logic        DDENn,
-	output logic        HLD,
+	output logic        head_load,       // 1 clk
+	output logic        read_track,      // demodulator in raw mode
 
 	// demodulator
 	input  logic  [7:0] IDAM_data[6],
@@ -91,11 +92,12 @@ module wd279x_command_III
 	wire        index_edge = last_index && !INDEXn;
 
 	assign busy = state != S_IDLE;
+	assign read_track = state == S_RT_WAIT || state == S_RT_READ;
 	assign status = !is_III ? 8'h00 :
 	                {READYn, reg_WRITE_PROTECTED, 1'b0, reg_RECORD_NOT_FOUND, reg_CRC_ERROR, reg_LOST_DATA, DRQ, busy};
 
 	always_ff @(posedge clk) begin
-		{drq_set, data_write, sector_write, tx_wr, tx_a1, tx_c2, tx_mark, tx_crc} <= '0;
+		{drq_set, data_write, sector_write, tx_wr, tx_a1, tx_c2, tx_mark, tx_crc, head_load} <= '0;
 		last_index <= INDEXn;
 		if (index_edge) index_count <= index_count + 3'd1;
 
@@ -105,7 +107,6 @@ module wd279x_command_III
 			reg_RECORD_NOT_FOUND <= 0;
 			reg_CRC_ERROR        <= 0;
 			reg_LOST_DATA        <= 0;
-			HLD   <= 0;
 			INTRQ <= 0;
 			wg    <= 0;
 		end else begin
@@ -125,8 +126,8 @@ module wd279x_command_III
 						INTRQ <= 1;
 						state <= S_IDLE;
 					end else begin
-						HLD        <= 1;
-						wait_count <= command[2] ? 5'd15 : 5'd0;	// E: 15 ms head settle
+						head_load  <= 1;
+						wait_count <= command[2] ? 5'd30 : 5'd0;	// E: 30 ms head settle (1 MHz clock)
 						state      <= S_DELAY;
 					end
 				S_DELAY:
