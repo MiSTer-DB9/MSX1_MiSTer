@@ -255,6 +255,115 @@ task automatic check_ascii16x(input string what);
     $display("ok   %s", what);
 endtask
 
+// ROM in the database as KUC (cart_device.json 24): the mapper in all four pages on an 8 MB
+// flash, two devices of the block (SCC and the DAC written by the mapper) with its device_ref
+task automatic check_kuc(input string what);
+    logic [31:0] crc = crc32(rom);
+    MSX::block_t b;
+    int scc = -1, dac = -1, err0 = errors;
+    db = {crc[7:0], crc[15:8], crc[23:16], crc[31:24], 8'd24, 8'h00, 8'h00, 8'h00};
+    download(6, db.size(), 0);
+    download(3, rom.size(), 0);
+    wait (upload);
+    wait (!upload || error != ERR_NONE);
+    repeat (10) @(posedge clk);
+    snapshot();
+    if (error !== ERR_NONE) begin errors++; $display("FAIL %s: error %0d", what, error); return; end
+    b = slot_layout[{2'd1, 2'd0, 2'd0}];
+    for (int p = 0; p < 4; p++) begin
+        MSX::block_t q = slot_layout[{2'd1, 2'd0, 2'(p)}];
+        if (q.mapper !== MAPPER_KUC || q.ref_ram !== b.ref_ram || q.device_ref !== b.device_ref) begin
+            errors++; $display("FAIL %s: page %0d mapper %0d ref %0d device_ref %0d", what, p, q.mapper, q.ref_ram, q.device_ref);
+        end
+    end
+    if (lookup_RAM[b.ref_ram].size !== 17'(32'h800000 / 8192)) begin
+        errors++; $display("FAIL %s: memory size %0d x 8 kB", what, lookup_RAM[b.ref_ram].size);
+    end
+    if (b.device_ref == '0) begin errors++; $display("FAIL %s: block without device_ref", what); end
+    for (int k = 0; k < 3; k++) begin
+        if (io_device[DEV_SCC][k].enable && io_device[DEV_SCC][k].device_ref == b.device_ref) scc = k;
+        if (io_device[DEV_DAC][k].enable && io_device[DEV_DAC][k].device_ref == b.device_ref) dac = k;
+    end
+    if (scc < 0) begin errors++; $display("FAIL %s: no SCC with the device_ref %0d of the block", what, b.device_ref); end
+    if (dac < 0) begin errors++; $display("FAIL %s: no DAC with the device_ref %0d of the block", what, b.device_ref); end
+    else if (io_device[DEV_DAC][dac].param[0] !== 1'b1) begin
+        errors++; $display("FAIL %s: DAC param %02h (expected bit 0: written by the mapper)", what, io_device[DEV_DAC][dac].param);
+    end
+    if (errors == err0) $display("ok   %s", what);
+endtask
+
+// ROM in the database as Yamanooto (cart_device.json 37): the mapper on an 8 MB flash, SCC and a
+// second PSG at 10h-11h (cartridge PSG: param bit 0 = 0) on the block
+task automatic check_yamanooto(input string what);
+    logic [31:0] crc = crc32(rom);
+    MSX::block_t b;
+    int scc = -1, psg = -1, err0 = errors;
+    db = {crc[7:0], crc[15:8], crc[23:16], crc[31:24], 8'd37, 8'h00, 8'h00, 8'h00};
+    download(6, db.size(), 0);
+    download(3, rom.size(), 0);
+    wait (upload);
+    wait (!upload || error != ERR_NONE);
+    repeat (10) @(posedge clk);
+    snapshot();
+    if (error !== ERR_NONE) begin errors++; $display("FAIL %s: error %0d", what, error); return; end
+    b = slot_layout[{2'd1, 2'd0, 2'd0}];
+    for (int p = 0; p < 4; p++) begin
+        MSX::block_t q = slot_layout[{2'd1, 2'd0, 2'(p)}];
+        if (q.mapper !== MAPPER_YAMANOOTO || q.ref_ram !== b.ref_ram || q.device_ref !== b.device_ref) begin
+            errors++; $display("FAIL %s: page %0d mapper %0d ref %0d device_ref %0d", what, p, q.mapper, q.ref_ram, q.device_ref);
+        end
+    end
+    if (lookup_RAM[b.ref_ram].size !== 17'(32'h800000 / 8192)) begin
+        errors++; $display("FAIL %s: memory size %0d x 8 kB", what, lookup_RAM[b.ref_ram].size);
+    end
+    if (b.device_ref == '0) begin errors++; $display("FAIL %s: block without device_ref", what); end
+    for (int k = 0; k < 3; k++) begin
+        if (io_device[DEV_SCC][k].enable && io_device[DEV_SCC][k].device_ref == b.device_ref) scc = k;
+        if (io_device[DEV_PSG][k].enable && io_device[DEV_PSG][k].device_ref == b.device_ref) psg = k;
+    end
+    if (scc < 0) begin errors++; $display("FAIL %s: no SCC with the device_ref %0d of the block", what, b.device_ref); end
+    if (psg < 0) begin errors++; $display("FAIL %s: no PSG with the device_ref %0d of the block", what, b.device_ref); end
+    else if (io_device[DEV_PSG][psg].port !== 8'h10 || io_device[DEV_PSG][psg].mask !== 8'hFE || io_device[DEV_PSG][psg].param[0] !== 1'b0) begin
+        errors++; $display("FAIL %s: PSG port %02h mask %02h param %02h", what, io_device[DEV_PSG][psg].port, io_device[DEV_PSG][psg].mask, io_device[DEV_PSG][psg].param);
+    end
+    if (!io_device[DEV_PSG][0].enable || io_device[DEV_PSG][0].param[0] !== 1'b1) begin
+        errors++; $display("FAIL %s: system PSG lost (enable %b param %02h)", what, io_device[DEV_PSG][0].enable, io_device[DEV_PSG][0].param);
+    end
+    if (errors == err0) $display("ok   %s", what);
+endtask
+
+// Machine pack with an SRAM block (FS-A1ST: 16 kB on the Panasonic mapper in slot 3-3, FS-4600F:
+// 4 kB on the National mapper): its
+// blocks point to entry 3, filled with FF, outside every other memory; no other block sees it
+task automatic check_machine_sram(input string what, input string name);
+    int fd, c, err0 = errors, n3 = 0;
+    int unsigned a, sz;
+    pack = {};
+    fd = $fopen(name, "rb"); while ((c = $fgetc(fd)) != -1) pack.push_back(8'(c)); $fclose(fd);
+    ram.delete();
+    download(1, pack.size(), 1);
+    snapshot();
+    if (error !== ERR_NONE) begin errors++; $display("FAIL %s: error %0d", what, error); return; end
+    a = lookup_SRAM[3].addr; sz = 32'(lookup_SRAM[3].size) * 1024;
+    if (sz == 0) begin errors++; $display("FAIL %s: lookup_SRAM[3] empty", what); return; end
+    for (int i = 0; i < 64; i++) begin
+        MSX::block_t q = slot_layout[i];
+        if (q.mapper == MAPPER_NONE) continue;
+        if (q.ref_sram == 2'd3) begin
+            n3++;
+            if (q.mapper != MAPPER_PANASONIC && q.mapper != MAPPER_NATIONAL) begin errors++; $display("FAIL %s: block %0d (mapper %0d) sees the machine SRAM", what, i, q.mapper); end
+        end
+        if (lookup_RAM[q.ref_ram].size != 0) begin
+            int unsigned ra = lookup_RAM[q.ref_ram].addr, rs = 32'(lookup_RAM[q.ref_ram].size) * 8192;
+            if (ra < a + sz && a < ra + rs) begin errors++; $display("FAIL %s: block %0d memory %07h+%0d overlaps the SRAM", what, i, ra, rs); end
+        end
+    end
+    if (n3 == 0) begin errors++; $display("FAIL %s: no block points to entry 3", what); end
+    for (int unsigned k = 0; k < sz; k += 97)
+        if (!ram.exists(a + k) || ram[a + k] !== 8'hFF) begin errors++; $display("FAIL %s: SRAM byte %0d not FF", what, k); break; end
+    if (errors == err0) $display("ok   %s: %0d kB at %07h, %0d blocks", what, sz / 1024, a, n3);
+endtask
+
 // ROM A and ROM B in the database as ASCII8 with 8 kB SRAM (cart_device.json 36): slot 1 and
 // slot 2 blocks of the mapper point to two different SRAM entries of 8 kB, the other blocks to an
 // entry without SRAM
@@ -451,6 +560,10 @@ initial begin
     make_rom(131072, 0, 16'h4010);  check_ascii16x("128 kB in DB as ASCII16-X");
     make_rom(100000, 0, 16'h4010);  check_ascii16x("100000 B in DB as ASCII16-X");
 
+    // --- KUC: flash of 8 MB, SCC and DAC on the same block
+    make_rom(262144, 0, 16'h4010);  check_kuc("256 kB in DB as KUC");
+    make_rom(262144, 0, 16'h4010);  check_yamanooto("256 kB in DB as Yamanooto");
+
     // --- C9: SRAM of ROM A and ROM B
     check_sram_ab("ROM A and ROM B with SRAM");
 
@@ -458,6 +571,12 @@ initial begin
     check_rom_areas("ROM A of 5.25 MB beside ROM B, ROM A of 17 MB");
 
     check_msx_midi("MSX-MIDI cartridge in slot A, not in both");
+
+    // --- SRAM in the machine definition (+pack2=<pack with an SRAM block>, e.g. FS-A1ST)
+    begin
+        string p2;
+        if ($value$plusargs("pack2=%s", p2)) check_machine_sram("SRAM of the machine (lookup_SRAM 3)", p2);
+    end
 
     if (errors == 0) $display("PASS cart_rom_tb");
     else             $display("FAILED cart_rom_tb: %0d errors", errors);

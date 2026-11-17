@@ -103,6 +103,27 @@ initial begin
     @(negedge clk); addr = 16'h8000; data = 8'h55; mreq = 1; wr = 1; req = 1; #0;
     if (out.sram_cs || out.ram_cs) fail("write to a ROM bank ignored");
     @(negedge clk); req = 0; idle();
+    // Z80 write cycle: MREQ a clk before WR (also refresh: MREQ alone). The memory latches rnw
+    // with the chip select, so no select before WR
+    @(negedge clk); addr = 16'h4555; data = 8'hAA; mreq = 1; #0;
+    if (out.sram_cs) fail("SRAM selected by MREQ alone (a read cycle before WR)");
+    @(negedge clk); wr = 1; req = 1; #0;
+    if (!(out.sram_cs && !out.rnw)) fail("SRAM write after MREQ");
+    @(negedge clk); req = 0; idle();
+
+    // mapper_param[0] (FS-A1WX/WSX, openMSX sram-mirrored): banks 80h-87h are SRAM, offset masked
+    block_info.mapper_param = 2'b01;
+    write(16'h7000, 8'h82);                            // region 4 (8000-9FFF) = 82h -> SRAM bank 0
+    write(16'h7400, 8'h87);                            // region 6 (C000-DFFF) = 87h -> SRAM bank 1
+    write(16'h7800, 8'h88);                            // region 5 (A000-BFFF) = 88h -> ROM
+    read(16'h8123); if (!(out.sram_cs && !out.ram_cs && out.addr == 27'h0000123)) fail("mirrored: bank 82h = SRAM bank 0"); idle();
+    read(16'hC123); if (!(out.sram_cs && out.addr == 27'h0002123)) fail("mirrored: bank 87h = SRAM bank 1"); idle();
+    @(negedge clk); addr = 16'h8456; data = 8'hA5; mreq = 1; wr = 1; req = 1; #0;
+    if (!(out.sram_cs && !out.rnw && out.addr == 27'h0000456)) fail("mirrored: write to bank 82h");
+    @(negedge clk); req = 0; idle();
+    expect_rom("mirrored: bank 88h is ROM", 16'hA000, 8'h88);
+    block_info.mapper_param = 2'b00;
+    expect_rom("not mirrored: bank 87h is ROM", 16'hC000, 8'h87);
 
     // RAM banks (180h..): 8 KB block (bank - 180h) of the main RAM (256 KB = 32 blocks), main_cs
     block_info.main_ram_size = 17'd32;
@@ -115,6 +136,9 @@ initial begin
     @(negedge clk); addr = 16'h4777; data = 8'h5A; mreq = 1; wr = 1; req = 1; #0;
     if (!(out.main_cs && !out.rnw && out.addr == 27'h0002777)) fail("RAM bank write");
     @(negedge clk); req = 0; idle();
+    @(negedge clk); addr = 16'h4777; mreq = 1; #0;
+    if (out.main_cs) fail("RAM selected by MREQ alone");
+    @(negedge clk); idle();
     write(16'h6C00, 8'h80); write(16'h7FF8, 8'b0000_1100);   // region 3 (6000-7FFF) = 180h
     @(negedge clk); addr = 16'h7FF0; data = 8'h77; mreq = 1; wr = 1; req = 1; #0;
     if (!(out.main_cs && !out.rnw && out.addr == 27'h0001FF0)) fail("RAM write at 7FF0 (region 3)");

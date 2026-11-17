@@ -28,8 +28,8 @@ CreateCRC: vampier.db (CRC32 -> FW ID)                                          
 | `conf.json` | `conf_t` | record types (BLOCK 0, DEVICE 1, KEYBOARD_LAYOUT 2, CARTRIGE 3, END 7) |
 | `block.json` | `block_t` | block types 0-11 |
 | `device.json` | `device_t` (5 bit) | device names 0-22 (MEM_MAPPER = `DEV_MSX2_RAM`, TMS99xx = `DEV_VDP_TMS`, V99xx = `DEV_VDP_V99xx`) |
-| `mapper.json` | `mapper_typ_t` (6 bit) | mapper names 0-40 (the spellings `GENRIC_16KB`/`GENRIC_8KB` are as in the RTL) |
-| `cart_device.json` | `cart_typ_t` | FW IDs: 0-13 menu cartridges, 20-59 ROM mappers selected by the DB |
+| `mapper.json` | `mapper_typ_t` (6 bit) | mapper names 0-43 (the spellings `GENRIC_16KB`/`GENRIC_8KB` are as in the RTL) |
+| `cart_device.json` | `cart_typ_t` | FW IDs: 0-13 menu cartridges, 20-60 ROM mappers selected by the DB |
 | `deviceParams.json` | `io_device.param` use of each device module | named device parameters, see section 2.6 |
 
 Run all tools from inside `tools/CreateMSXpack`: the JSON tables and `ROM` (unless `--rom-dir`), `Extension`, `MSX` are opened by relative name (`createDev.py` also uses a temporary `ROM.bin` in the current directory).
@@ -59,8 +59,8 @@ The element text is a name from `device.json`; an unknown name prints `Device '<
 | Attribute | Meaning |
 |---|---|
 | `port`, `mask` | 8 bit each. The device decodes an access when `(addr & mask) == port` |
-| named parameters | encoded through `deviceParams.json` (section 2.6): `MODE` (TMS99xx: PAL/NTSC), `VDP_ID` (V99xx: V9938/V9958), `system` (PSG: true = the machine PSG with the joystick/keyboard ports), `OCM` (PPI), `inverted` (RESET_STATUS), `turbo` and `sram` (MATSUSHITA: the 5.37 MHz turbo switch and the 2 kB SRAM are present) |
-| `param` | raw 8-bit parameter for devices **without** an entry in `deviceParams.json` (for example KANJI: bit 0 = hangul, bit 1 = lascom) |
+| named parameters | encoded through `deviceParams.json` (section 2.6): `MODE` (TMS99xx: PAL/NTSC), `VDP_ID` (V99xx: V9938/V9958), `system` (PSG: true = the machine PSG with the joystick/keyboard ports), `OCM` (PPI), `inverted` (RESET_STATUS), `turbo` and `sram` (MATSUSHITA: the 5.37 MHz turbo switch and the 2 kB SRAM are present), `hangul` and `level_2_via` (KANJI, as openMSX: `hangul="true"` 7-bit row; `level_2_via` `read` (default), `write` (FS-A1ST / GT), `interlocked_write_read` (FS-A1WX / WSX, Sanyo PHC-35J / 70FD), `only_level_1` (DAh / DBh act as D8h / D9h, mask 0xFC)). `S1985` (switched I/O FEh, port 40h mask F0h) has no parameter; every machine with `<engine>S1985</engine>` declares it |
+| `param` | raw 8-bit parameter for devices **without** an entry in `deviceParams.json` |
 | `ROM_SHA1`, `rom_skip`, `rom_size` | the device's own ROM, appended to the record (KANJI font) |
 | `shared_slot`, `shared_subslot`, `shared_block`, `shared_size` (all required together), `shared_offset` (default 0) | the device memory is a window into an existing block (1chipMSX KANJI uses the ESE-RAM block) |
 
@@ -86,21 +86,22 @@ Top-level devices without `shared_slot` are written first, devices with `shared_
 
 Attributes: `start` (first 16 kB page 0-3, default 0) and `count` (pages, default 4, clipped to `4 - start`). A `<count>` child is also accepted but not used by any file; do not give both.
 
-Children, each at most once per block (except `<device>`, which may repeat, e.g. OPM + YM2148 in one block). They are written in this order: memory, shared_memory, mapper, cart, device(s), ref.
+Children, each at most once per block (except `<device>`, which may repeat, e.g. OPM + YM2148 in one block). They are written in this order: memory, shared_memory, mapper, sram, cart, device(s), ref.
 
 | Child | Attributes and content | Effect |
 |---|---|---|
 | `<memory>ROM</memory>` | `SHA1` (lowercase hex, required), `filename` (informational, printed in the "not found" message), `skip` and `size` (bytes, decimal or hex, cut a slice from the dump), `exactFilename` (path, bypasses the SHA1 lookup; supported, unused) | ROM block. Stored in the pack padded with FF to a multiple of 16 kB |
 | `<memory>RAM</memory>` | `size` (bytes, default = pages x 16 kB), `pattern` (fill, default 1) | RAM block. 4 MB is encoded as 0. `size="8192"` in a one-page block: 8 kB in the upper half of the page, the lower half unmapped (Casio PV-7: E000-FFFF). Fill patterns: 1 = FF, 2 = 00, 3/4/5 = DRAM power-on stripes (0 = "data from DDR", do not use for RAM). Machines use 1, 2, 3, 4 |
 | `<shared_memory>` | text `ROM` = read-only, anything else read/write; `slot`, `subslot`, `block` (source), `offset`, `size` (bytes) | a window into another block's memory. The source block must already exist in the pack. See the `offset` pitfall in section 6 |
-| `<mapper>NAME</mapper>` | name from `mapper.json`; optional `param` 0-3 | MAPPER record. `param` is used only by `DRAM` (which 16 kB page of the top 64 kB RAM). A ROM block without a mapper is linear (`MAPPER_OFFSET`) in the core |
+| `<mapper>NAME</mapper>` | name from `mapper.json`; optional `param` 0-3 | MAPPER record. `param` is used by `DRAM` (which 16 kB page of the top 64 kB RAM), `MSXDOS2` (bank register: 0 6000-6FFF, 1 7FF0, 2 7FFE) and `PANASONIC` (1 = the SRAM mirrored over banks 80h-87h, FS-A1WX / WSX). A ROM block without a mapper is linear (`MAPPER_OFFSET`) in the core |
+| `<sram>SIZE</sram>` | bytes, a multiple of 1024, below 256 kB | battery SRAM of the block's mapper: Panasonic (FS-A1ST 16384, FS-A1GT 32768, FS-A1WX / WSX 16384) and National (FS-4600F 4096). Filled with FFh on every pack load, not saved |
 | `<cart>A</cart>` | `A`/`a`/`0` or `B`/`b`/`1` | marks this block as the cartridge slot A or B (SLOT record). Normally `<block start="0">` (all 4 pages) |
 | `<device>NAME</device>` | `port` + `mask` (adds an IO_DEVICE record; mask defaults to FF if only `port` is given), named parameters or raw `param` | device bound to this block (memory-mapped device or device with a mapper): `MEM_MAPPER`, `WD2793`, `TC8566AF`, `OPM`, `YM2148`, `SCC`, ... |
 | `<ref to_block="n">DEVICE</ref>` or `MEMORY` | `to_block` 0-3 | `DEVICE`: this block also selects the device of block `n` (FDC registers visible in page 2 too). `MEMORY`: copy memory, mapper, mapper param and offset of block `n` |
 
 `REF_*` refer to a block in the **same slot and subslot**, and the referenced block must come first.
 
-Machine XML cannot declare battery SRAM; `<sram>` is honoured only in the FW pack.
+A machine has at most one `<sram>` (lookup_SRAM entry 3). The RTC memory, the 2 kB SRAM of `MATSUSHITA` and the 16 bytes of `S1985` need no `<sram>`: they live in the device. None of them is saved; all are FFh after a pack load.
 
 ### 2.5 FDC rules
 
@@ -220,10 +221,10 @@ Root `<fwConfig>`, children `<fw name="X">`. `X` must be a key of `cart_device.j
 | `<SHA1 [skip] [size]>sha1</SHA1>` | ROM of the block from the ROM folder (decimal skip/size) |
 | `<filename>` | informational |
 | `<mapper>` | name from `mapper.json` |
-| `<device [port] [mask] [param] [named params] [memory="block"]>NAME</device>` | device. Named parameters are encoded via `deviceParams.json`. `memory="block"` means the device uses the block's memory (OPL4 wave ROM/RAM). A missing block memory gives `NOT FW CONF` in the core |
+| `<device [port] [mask] [param] [named params] [memory="block"]>NAME</device>` | device; may repeat, all devices of a block share its device reference (KUC: SCC + DAC, Yamanooto: SCC + PSG). Named parameters are encoded via `deviceParams.json`. `memory="block"` means the device uses the block's memory (OPL4 wave ROM/RAM). A missing block memory gives `NOT FW CONF` in the core |
 | `<ram>bytes</ram>` | RAM, pattern FF |
 | `<sram>bytes</sram>` | battery SRAM, stored in 1 kB units (slot A and B get separate SRAM areas) |
-| `<flash>bytes</flash>` | the memory is a flash chip of this size: loaded ROM, FF to the end (ASCII16-X, 8 MB) |
+| `<flash>bytes</flash>` | the memory is a flash chip of this size: loaded ROM, FF to the end (ASCII16-X, KUC, Yamanooto: 8 MB) |
 | `<extend>bytes</extend>` | same record, meaning "RAM behind the ROM" (MoonSound: 2 MB ROM + 2 MB sample RAM = 4 MB) |
 | `<device_param>` | parsed but unused |
 
@@ -253,7 +254,7 @@ The OSD item value is converted to `cart_typ_t` in `rtl/msx_config.sv`, and the 
 
 - `CART_TYP_ROM` (11) is special: the loader computes the CRC32 of the loaded ROM and asks the DB. The DB record gives the FW ID (20-59). A ROM of at most 64 kB that is not in the DB runs as a plain ROM, with FW ID 20/21/22 chosen from the `AB` header.
 - `CART_TYP_EMPTY` (12) has no `<fw>` entry; its table slot points to the empty configuration. That is why an empty slot also needs a FW pack.
-- **Free FW IDs**: 10, 14 and 15 for new menu cartridges (`cart_typ_t` and the status fields are 4 bits). For DB mappers: 24, 37-48 except 40-42, and 60 and up.
+- **Free FW IDs**: 10, 14 and 15 for new menu cartridges (`cart_typ_t` and the status fields are 4 bits). For DB mappers: 38-48 except 40-42, and 61 and up.
 - Menu text: `CONF_STR_SLOT_A` / `CONF_STR_SLOT_B` in `rtl/msx_config.sv`.
 
 ## 4. Recipes
@@ -280,7 +281,7 @@ The OSD item value is converted to `cart_typ_t` in `rtl/msx_config.sv`, and the 
 
 ### 4.3 New ROM mapper selected by the DB
 
-1. Give the FW configuration a free ID (24, 37-48 except 40-42, 58+) in `cart_device.json` and add `<fw>` in both Extension XMLs.
+1. Give the FW configuration a free ID (38-48 except 40-42, 61+) in `cart_device.json` and add `<fw>` in both Extension XMLs.
 2. In `../CreateCRC/romtypes.json` add one line `"RomType": "fw name"` to `types`. `RomType` is the name in the "Not supported" table of `../CreateCRC/report.md`; the FW ID is taken from `cart_device.json`.
 3. Rebuild the FW pack and `vampier.db` (see [../CreateCRC/README.md](../CreateCRC/README.md)).
 4. If the mapper itself is new hardware, see 4.4.
@@ -308,7 +309,7 @@ The OSD item value is converted to `cart_typ_t` in `rtl/msx_config.sv`, and the 
 |---|---|---|
 | 0 | RAM | p0 = size/16 kB (0 = 256 = 4 MB), p1 = fill pattern, p2 bit 0 = 8 kB in the upper half of the page (p0 = 1) |
 | 1 | ROM | p0, p1 = ceil(size/16 kB) low and high byte; data follows |
-| 2 | SRAM | FW pack only |
+| 2 | SRAM | p0 = size/1 kB. FW pack: the SRAM of the cartridge (lookup_SRAM 1 / 2), machine pack: of the machine (3) |
 | 3 | DEVICE | p0 = device id, p1 = param |
 | 4 | MAPPER | p0 = mapper id, p1 = (param&3)<<2 |
 | 5 | SLOT (cartridge) | p0 = 0 (A) / 1 (B) |
@@ -321,10 +322,11 @@ The OSD item value is converted to `cart_typ_t` in `rtl/msx_config.sv`, and the 
 
 ### 5.2 FW pack (`MsX`)
 
-- 16-byte header: `'M' 's' 'X' 00`, a uint32 LE file offset of the ROM table, 8 zero bytes.
+- 16-byte header: `'M' 's' 'X' 00`, a uint32 LE file offset of the ROM table, a uint32 LE file offset of the name table (0 = none), 4 zero bytes. The core reads only bytes 0-7.
 - At 0x10: 256 x uint32 LE file offset of configuration N (N = FW ID). Unused IDs point to an empty configuration (a single END record).
 - A configuration is a list of 6-byte records `type addr block_type p1 p2 p3`, ended by `07 00 00 00 00 00`. The slot bits of `addr` are 0, the core ORs in the cartridge slot.
 - The ROM table is a uint32 LE offset per distinct ROM (deduplicated by skip, size and SHA1), followed by the ROM images padded with FF to 16 kB.
+- The name table follows the ROM images. It is for Main_MiSTer (`docs/MSX1/Configuration.txt`, section 9), not for the core: `'N' 'A' 'M' '1'`, then three lists, the mappers (`mapper.json`), the devices (`device.json`) and the FW configurations (`cart_device.json`, 256 entries). Each list is a uint16 LE count and that many NUL-terminated ASCII names, indexed by number; an unused number has an empty name.
 
 ## 6. Pitfalls
 
@@ -335,7 +337,7 @@ The OSD item value is converted to `cart_typ_t` in `rtl/msx_config.sv`, and the 
 5. Do not mix `<block>` and `<secondary>` in one `<primary>`.
 6. SHA1 values in XML must be lowercase hex.
 7. createComp builds a pack in memory and writes it only when no ROM is missing and no exception occurred; otherwise an existing `.msx` of that machine is deleted. Missing ROMs (block `SHA1` / `exactFilename`, device `ROM_SHA1`) are collected for the whole machine, so the report lists all of them. Other errors are only warnings in the report. Test: `py -m unittest discover tests`.
-8. `<sram>` works only in FW configurations; a machine XML cannot declare SRAM.
+8. A machine has one `<sram>` (lookup_SRAM entry 3); a second one would replace the first.
 9. `expander_wo` is stored but ignored by the RTL.
 10. Run the tools from inside `tools/CreateMSXpack` (JSON tables by relative name). The ROM folder can be elsewhere: `--rom-dir` in both tools.
 11. Both extension XMLs must be edited together.
@@ -362,3 +364,21 @@ The full table of messages and OSD errors with their meaning is in the [README](
    - Loader regression: `rtl/tb/run_mu_equiv.sh <packs dir> <CART_FW.msx> <ROM set dir>`, `run_memory_upload.sh` (OCM), `run_cart_rom.sh <VG_8020 pack> <CART_FW_EN.msx>`, `run_mu_restart.sh`, `run_ocm_boot.sh`.
    - `run_mu_equiv.sh` compares the loader against the reference revision; run it after any change of `memory_upload.sv` or of the pack format.
 4. Synthesis with Quartus is run separately; its result was not part of these tools.
+
+## 9. Configuration report (developer build)
+
+A developer build can show what the loader has built: after each load the core reports it, and Main_MiSTer writes `docs/MSX1/Configuration.txt`, opened in the system menu with **Help**. The file lists:
+
+- the loaded packs, the mapper database and the status (OK or the OSD error),
+- each cartridge slot: the configuration in use (e.g. `KONAMI_SCC`), whether it came from the mapper database, from the OSD or as a plain ROM, the ROM file and its CRC32,
+- the memory map by slot, subslot and page (RAM, ROM, SRAM, mappers, devices) and the I/O ports of the devices.
+
+How to get it:
+
+- **Core:** enable `VERILOG_MACRO "MSX_CFG_REPORT=1"` in `MSX1.qsf`. A release build leaves it out; the report logic is then not in the FPGA.
+- **Main_MiSTer** with `support/msx/msx_cfg.cpp`. A Main without it ignores the report; a core without it gives Main nothing to show.
+- Names of mappers and devices come from the name table of the FW pack (section 5.2); without it the numbers are shown.
+- Help opens text files only with `fb_terminal=1` in `MiSTer.ini` (the default).
+- The file is written only when its text changes.
+
+The report: 20 bytes in DDR3 at `MSX::DDR3_INFO` (0x34000000, 4 kB reserved), written by `rtl/cfg_report.sv` after each loader run: `'MSXR'`, valid (written 0 first and 1 last), version 1, generation, `error_t`, per cartridge slot the source (`cart_src_t`) and the FW ID, then the CRC32 of ROM A and ROM B (LE). Tests: `rtl/tb/run_cfg_report.sh <VG_8020 pack> <CART_FW_EN.msx>` and `rtl/tb/run_msxdos2_boot.sh` (`run_machine_boot.sh` with `VDEFS="+define+MSX_CFG_REPORT"`).

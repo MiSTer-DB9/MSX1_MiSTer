@@ -21,6 +21,7 @@
 // +audio_min=<n>: the left output must swing by at least n.
 // +slota=<n>: OSD slot A item (CONF_STR_SLOT_A, 1 = FDC; needs +fw). +error=<n>: the pack load
 // must stop with this error_t (e.g. 11 = ERR_FDC_PRESENT), then PASS.
+// +midilog=<file>: bytes on the MIDI OUT line (uart_txd, 31250 Bd 8N1), one hex byte per line.
 // +frames=<prefix> +frame_ms=<ms> +frame_n=<n>: n frames of the video output (DE area) from
 // frame_ms on as <prefix>_NNN.ppm; +frame_every=<ms> repeats the n frames every so many ms. +border=1: OSD Border on (status[41]).
 // Turbo R: +firmware=1 turns the firmware switch on (OSD status[26]); +pause_ms=<ms> presses the
@@ -38,6 +39,7 @@
 // screen has been without it after the reset.
 // Run: wsl.exe -- bash rtl/tb/run_machine_boot.sh <machine.msx> <image.dsk> [expected text]
 module machine_boot_tb;
+wire            uart_txd;
 localparam int unsigned FW_BASE = MSX::DDR3_FW_PACK, DB_BASE = MSX::DDR3_DB;   // DDR3 areas
 
 // clk_sdram = 4x clk_core, phase aligned (as the PLL)
@@ -70,8 +72,8 @@ wire   [15:0] audio_L, audio_R;
 wire          led_pause, pause;
 logic         osd_status = 0;
 wire   [27:0] ddr3_addr;
-wire          ddr3_rd, ddr3_ready;
-wire    [7:0] ddr3_dout;
+wire          ddr3_rd, ddr3_we, ddr3_ready;
+wire    [7:0] ddr3_dout, ddr3_din;
 
 block_device_if block_device_FDD[2*MSX::N_FDC]();
 block_device_if block_device_SD();
@@ -88,12 +90,12 @@ msx_system sys (
     .ioctl_addr(ioctl_addr), .rtc(65'd0), .sdram_sz(16'h8002), .uart_speed(32'd115200),
     .img_readonly(1'b0), .img_size(64'd0), .sd_img_mounted(1'b0),
     .block_device_FDD(block_device_FDD), .msx_config(msx_config),
-    .video_bus(video_bus), .audio_L(audio_L), .audio_R(audio_R), .uart_rxd(1'b1), .tape_adc(1'b0),
+    .video_bus(video_bus), .audio_L(audio_L), .audio_R(audio_R), .uart_rxd(1'b1), .uart_txd(uart_txd), .tape_adc(1'b0),
     .led_pause(led_pause), .pause(pause), .osd_status(osd_status),
     .ext_SD_card_bus(ext_SD_card_bus),
     .memory_bus_sdram_ch1(sd_ch1), .memory_bus_sdram_ch2(sd_ch2), .memory_bus_sdram_ch3(sd_ch3),
     .wave_bus_sdram_ch4(sd_ch4), .cpu_phase(cpu_phase),
-    .ddr3_addr(ddr3_addr), .ddr3_rd(ddr3_rd), .ddr3_dout(ddr3_dout),
+    .ddr3_addr(ddr3_addr), .ddr3_rd(ddr3_rd), .ddr3_we(ddr3_we), .ddr3_din(ddr3_din), .ddr3_dout(ddr3_dout),
     .ddr3_ready(ddr3_ready)
 );
 assign ext_SD_card_bus.data_from_SD = 8'hFF;  assign ext_SD_card_bus.busy = 1'b0;
@@ -108,9 +110,16 @@ ddram ddr (
     .reset(reset), .DDRAM_CLK(clk_core), .DDRAM_BUSY(1'b0), .DDRAM_BURSTCNT(DDRAM_BURSTCNT),
     .DDRAM_ADDR(DDRAM_ADDR), .DDRAM_DOUT(DDRAM_DOUT), .DDRAM_DOUT_READY(DDRAM_DOUT_READY),
     .DDRAM_RD(DDRAM_RD), .DDRAM_DIN(DDRAM_DIN), .DDRAM_BE(DDRAM_BE), .DDRAM_WE(DDRAM_WE),
-    .addr(ddr3_addr), .dout(ddr3_dout), .din(8'h00), .we(1'b0), .rd(ddr3_rd), .ready(ddr3_ready),
+    .addr(ddr3_addr), .dout(ddr3_dout), .din(ddr3_din), .we(ddr3_we), .rd(ddr3_rd), .ready(ddr3_ready),
     .dout64()
 );
+
+// configuration report written by the core (cfg_report)
+byte unsigned report[20];
+always_ff @(posedge clk_core)
+    if (DDRAM_WE) for (int b = 0; b < 8; b++)
+        if (DDRAM_BE[b] && {DDRAM_ADDR[24:0], 3'(b)} - MSX::DDR3_INFO < 20)
+            report[{DDRAM_ADDR[24:0], 3'(b)} - MSX::DDR3_INFO] <= DDRAM_DIN[8*b +: 8];
 
 logic [28:0] ddr_rd_addr;
 int          ddr_wait = -1;
@@ -268,6 +277,17 @@ initial forever begin                                   // HPS: one request at a
 end
 
 // ------------------------------------------------------------------ monitors
+// +kanjilog: memory reads of the Kanji device (address of the device, merged bus address), 80
+logic kanjilog = 1'b0;
+int   kj_n = 0;
+initial kanjilog = $test$plusargs("kanjilog");
+always @(posedge clk_core)
+    if (kanjilog && kj_n < 80 && sys.MSX.devices.kanji_ram_cs) begin
+        kj_n++;
+        $display("%0t kanji read: device addr %07h, bus addr %07h, slots addr %07h", $time,
+                 sys.MSX.devices.kanji_ram_addr, sys.memory_bus_msx.addr, sys.MSX.memory_bus_slots.addr);
+    end
+
 logic req_q = 0;
 always @(posedge clk_core) req_q <= sys.MSX.cpu_bus.req;
 wire  access = sys.MSX.cpu_bus.req && !req_q && !reset;
@@ -281,6 +301,42 @@ int          s1990_wr = 0, main_rd = 0, main_wr = 0, a7_wr = 0, m1_all = 0, vdp_
 logic        r800_q = 0, dram_q = 0, hold_q = 0;
 logic  [1:0] sel_q = '0;
 int          sel_log = 0, io_holds = 0;
+
+// +sramlog=<n>: the first n writes to the SRAM of a mapper (CPU address, SRAM offset, data)
+int   sramlog_n = 0, sram_wr = 0;
+initial void'($value$plusargs("sramlog=%d", sramlog_n));
+always @(posedge clk_core)
+    if (sys.MSX.msx_slots.memory_bus_mappers.sram_cs && !sys.MSX.msx_slots.memory_bus_mappers.rnw && access) begin
+        sram_wr++;
+        if (sram_wr <= sramlog_n)
+            $display("%0t sram write %04h -> %05h = %02h (last M1 %04h) bus %07h cs %b rnw %b ref_sram %0d base %07h", $time,
+                     sys.MSX.cpu_bus.addr, sys.MSX.msx_slots.memory_bus_mappers.addr[16:0], sys.MSX.cpu_bus.data, last_m1,
+                     sys.memory_bus_msx.addr, sys.memory_bus_msx.ram_cs, sys.memory_bus_msx.rnw,
+                     sys.MSX.msx_slots.active_block.ref_sram, sys.MSX.msx_slots.base_sram);
+    end
+
+// +sramrd_ms=<ms>: reads of the SRAM of a mapper from that time on (data as the CPU gets it), 20000
+int          sramrd_ms = -1, sramrd_n = 0, now_ms = 0;
+logic        srd_pend = 0;
+logic [15:0] srd_a, srd_m1;
+logic [16:0] srd_o;
+logic  [7:0] srd_d;
+initial void'($value$plusargs("sramrd_ms=%d", sramrd_ms));
+always @(posedge clk_core)
+    if (sys.MSX.msx_slots.memory_bus_mappers.sram_cs && sys.MSX.cpu_bus.rd) begin
+        if (!srd_pend) begin
+            srd_pend <= 1'b1; srd_a <= sys.MSX.cpu_bus.addr; srd_m1 <= last_m1;
+            srd_o <= sys.MSX.msx_slots.memory_bus_mappers.addr[16:0];
+        end
+        srd_d <= sys.MSX.d_to_cpu;
+    end else if (srd_pend) begin
+        srd_pend <= 1'b0;
+        if (sramrd_ms >= 0 && now_ms >= sramrd_ms && sramrd_n < 20000) begin
+            sramrd_n++;
+            $display("%0t sram read %04h -> %05h = %02h (last M1 %04h)", $time, srd_a, srd_o, srd_d, srd_m1);
+        end
+    end
+
 always @(posedge clk_core) begin
     if (access && sys.MSX.cpu_bus.mreq && sys.MSX.cpu_bus.m1) begin
         last_m1 <= sys.MSX.cpu_bus.addr; m1_all++;
@@ -513,6 +569,26 @@ final if (fr_on) begin
     $fclose(frame_fd);
 end
 
+// +midilog: UART receiver on uart_txd
+localparam int MIDI_BIT = MSX::CLK_CORE_HZ / 31250;
+int         midi_fd = 0, midi_cnt = 0, midi_n = 0;
+bit         midi_busy = 0;
+logic [7:0] midi_sh;
+initial begin string f; if ($value$plusargs("midilog=%s", f)) midi_fd = $fopen(f, "w"); end
+always @(posedge clk_core) if (midi_fd != 0) begin
+    if (!midi_busy) begin
+        if (!uart_txd) begin midi_busy = 1; midi_cnt = MIDI_BIT * 3 / 2; midi_n = 0; end   // middle of bit 0
+    end else if (--midi_cnt == 0) begin
+        if (midi_n < 8) begin midi_sh = {uart_txd, midi_sh[7:1]}; midi_n++; midi_cnt = MIDI_BIT; end
+        else begin
+            if (uart_txd) $fdisplay(midi_fd, "%02x", midi_sh);
+            else          $display("%0t MIDI framing error", $time);
+            midi_busy = 0;
+        end
+    end
+end
+final if (midi_fd != 0) $fclose(midi_fd);
+
 // V99x8 register writes with the beam position
 bit reglog_on = 0, regwr_q;
 int reglog_n = 0;
@@ -660,6 +736,16 @@ initial begin
     end
     $display("%0t pack loaded, error=%0d, msx_config.fdd=%b, CMOS Z80 %0d, VDP I/O wait %0d", $time, sys.error,
              msx_config.fdd, msx_config.cmos_z80, msx_config.vdp_io_wait);
+`ifdef MSX_CFG_REPORT
+    repeat (5) @(posedge clk_core);
+    wait (!sys.cfg_report.ddr3_request && !sys.cfg_report.pending);
+    repeat (20) @(posedge clk_core);
+    $display("REPORT %s valid %0d gen %0d error %0d A %0d/%0d %02h%02h%02h%02h B %0d/%0d %02h%02h%02h%02h",
+             {report[0], report[1], report[2], report[3]}, report[4], report[6], report[7], report[8], report[9],
+             report[15], report[14], report[13], report[12], report[10], report[11], report[19], report[18], report[17], report[16]);
+`else
+    if (report[0] != 0) $display("FAILED machine_boot_tb: configuration report written without MSX_CFG_REPORT");
+`endif
     if (want_err != 0) begin
         if (int'(sys.error) == want_err) $display("PASS machine_boot_tb: pack error %0d as expected", want_err);
         else                             $display("FAILED machine_boot_tb: pack error %0d, expected %0d", sys.error, want_err);
@@ -681,6 +767,7 @@ initial begin
     end
 
     for (int ms = 0; ms < run_ms; ms += 100) begin
+        now_ms = ms;
         repeat (MSX::CLK_CORE_HZ / 10) @(posedge clk_core);
         if (frame_prefix != "" && ms + 100 >= frame_ms) frame_arm = 1;
         if (frame_every > 0 && ms > frame_ms && (ms - frame_ms) % frame_every == 0) frame_left = frame_n;
@@ -779,6 +866,12 @@ initial begin
     $display("%0t final screen:\n%s", $time, screen_text());
     if (found_ms < 0 && expect_txt != "" && expect_armed && vram_has(expect_txt)) found_ms = run_ms;
     if ($value$plusargs("vram_dump=%s", dump)) dump_vram(dump);
+    if ($value$plusargs("sram_dump=%s", dump)) begin   // SRAM of the machine (lookup_SRAM[3])
+        fd = $fopen(dump, "wb");
+        for (int i = 0; i < int'(sys.lookup_SRAM[3].size) * 1024; i++) $fwrite(fd, "%c", sdram[25'(sys.lookup_SRAM[3].addr - (27'd1 << MSX::BRAM_WIDTH)) + 25'(i)]);
+        $fclose(fd);
+        $display("SRAM %0d kB at %07h dumped, %0d writes", sys.lookup_SRAM[3].size, sys.lookup_SRAM[3].addr, sram_wr);
+    end
     $display("disk ROM M1 %0d, FDC commands %0d, Read Data ok %0d / abnormal %0d, HPS reads %0d (LBA 0: %0d)",
              disk_m1, fdc_log, reads_ok, reads_bad, lba_reads, lba0_reads);
     if (io_holds != 0) $display("VDP accesses held back: %0d", io_holds);
