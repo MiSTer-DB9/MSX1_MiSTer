@@ -20,7 +20,7 @@ typedef enum logic {CAS_AUDIO_FILE,CAS_AUDIO_ADC} cas_audio_src_t;
 typedef enum logic [1:0] {Z80, R800, UNKN1, UNKN2} cpu_t;
 
 typedef enum logic [3:0] {CART_TYP_SCC, CART_TYP_SCC2, CART_TYP_FM_PAC, CART_TYP_MFRSD, CART_TYP_GM2, CART_TYP_FDC, CART_MEGASCC1, CART_MEGASCC2, CART_MEGA_ASCII_8, CART_MEGA_ASCII_16, CART_TYP_UNUSED10, CART_TYP_ROM, CART_TYP_EMPTY, CART_TYP_MOONSOUND, CART_TYP_MSX_MIDI } cart_typ_t;
-typedef enum logic [4:0] {DEV_NONE, DEV_OPLL, DEV_SCC, DEV_WD2793, DEV_MSX2_RAM, DEV_LATCH_PORT, DEV_KANJI, DEV_OCM_BOOT, DEV_VDP_TMS, DEV_VDP_V99xx, DEV_RTC, DEV_PSG, DEV_PPI, DEV_RESET_STATUS, DEV_TC8566AF, DEV_OPM, DEV_YM2148, DEV_DAC, DEV_SYSTIMER, DEV_S1990, DEV_TURBOR_PCM, DEV_TURBOR_PAUSE, DEV_OPL4, DEV_MSX_MIDI, DEV_MATSUSHITA, DEV_CIEL_TURBO } device_t;
+typedef enum logic [4:0] {DEV_NONE, DEV_OPLL, DEV_SCC, DEV_WD2793, DEV_MSX2_RAM, DEV_LATCH_PORT, DEV_KANJI, DEV_OCM_BOOT, DEV_VDP_TMS, DEV_VDP_V99xx, DEV_RTC, DEV_PSG, DEV_PPI, DEV_RESET_STATUS, DEV_TC8566AF, DEV_OPM, DEV_YM2148, DEV_DAC, DEV_SYSTIMER, DEV_S1990, DEV_TURBOR_PCM, DEV_TURBOR_PAUSE, DEV_OPL4, DEV_MSX_MIDI, DEV_MATSUSHITA, DEV_CIEL_TURBO, DEV_S1985 } device_t;
 typedef enum logic [5:0] {MAPPER_NONE, MAPPER_OFFSET, MAPPER_ASCII16, MAPPER_RTYPE, MAPPER_ASCII8, MAPPER_KOEI, MAPPER_WIZARDY, MAPPER_KONAMI, 
                           MAPPER_FMPAC, MAPPER_GM2, VY0010, MAPPER_KONAMI_SCC, MAPPER_MSX2, MAPPER_GENERIC16KB, MAPPER_CROSS_BLAIM, MAPPER_GENERIC8KB, 
                           MAPPER_HARRY_FOX, MAPPER_ZEMINA_80, MAPPER_ZEMINA_90, MAPPER_KONAMI_SCC_PLUS, 
@@ -36,6 +36,8 @@ typedef enum logic [5:0] {MAPPER_NONE, MAPPER_OFFSET, MAPPER_ASCII16, MAPPER_RTY
                           MAPPER_ASCII16X,
                           MAPPER_HIDDEN,          // no mapper module: memory of the block is not on the CPU bus (MoonSound)
                           MAPPER_NEO8, MAPPER_NEO16,
+                          MAPPER_MSXDOS2,
+                          MAPPER_KUC, MAPPER_YAMANOOTO,
                           MAPPER_UNUSED} mapper_typ_t;
 typedef enum logic [3:0] {BLOCK_RAM, BLOCK_ROM, BLOCK_SRAM, BLOCK_DEVICE, BLOCK_MAPPER, BLOCK_CART, BLOCK_REF_MEM, BLOCK_REF_DEV, BLOCK_IO_DEVICE, BLOCK_EXPANDER, BLOCK_REF_SHARED_MEM, BLOCK_FLASH} block_t;
 typedef enum logic [2:0] {CONF_BLOCK, CONF_DEVICE, CONF_LAYOUT, CONF_CARTRIGE, CONF_BLOCK_FW, CONF_UNUSED5, CONF_UNUSED6, CONF_END} conf_t;
@@ -485,6 +487,23 @@ package MSX;
         cart_typ_t   typ;
     } config_cart_t;
 
+    // How the configuration of a cartridge slot was chosen (configuration report for the HPS)
+    typedef enum logic [2:0] {
+        CART_SRC_NONE,          // the machine has no such slot, or no configuration yet
+        CART_SRC_OSD,           // cartridge chosen in the OSD: fw = cart_typ_t
+        CART_SRC_DB,            // ROM found in the mapper DB
+        CART_SRC_PLAIN,         // ROM not in the DB (or no DB): plain ROM, fw 20 / 21 / 22
+        CART_SRC_NO_ROM,        // ROM chosen, no ROM file loaded
+        CART_SRC_LEFT_OUT,      // FDC cartridge left out, the machine has its own FDC
+        CART_SRC_FAIL           // ROM refused (see the error)
+    } cart_src_t;
+
+    typedef struct packed {
+        cart_src_t   src;
+        logic  [7:0] fw;        // FW pack configuration (cart_device.json)
+        logic [31:0] crc;       // CRC32 of the ROM file
+    } cart_report_t;
+
     typedef struct {
         logic [7:0] mask; 
         logic [7:0] port;
@@ -537,6 +556,7 @@ package MSX;
     localparam logic [27:0] DDR3_CAS      = 28'h1700000;   //  9 MB
     localparam logic [27:0] DDR3_ROM_A    = 28'h2000000;   // 16 MB
     localparam logic [27:0] DDR3_ROM_B    = 28'h3000000;   // 16 MB
+    localparam logic [27:0] DDR3_INFO     = 28'h4000000;   //  4 kB  configuration report, read by the HPS
     localparam logic [26:0] ROM_MAX       = 27'h1000000;   // larger ROM: ERR_ROM_TOO_BIG
 
     // System memory below 2^BRAM_WIDTH is BRAM in the FPGA, the rest SDRAM (system_memory).
@@ -550,7 +570,7 @@ package MSX;
     localparam int N_OPLL         = 2;      // 0..3  machine + FM-PAC, or FM-PAC in A and B
     localparam int N_OPM          = 1;      // 0..3
     localparam int N_SCC          = 2;      // 0..2
-    localparam int N_PSG          = 1;      // 0..3
+    localparam int N_PSG          = 2;      // 0..3  system + Yamanooto
     localparam int N_DAC          = 2;      // 0..3  Synthesizer ROM in A and B
     localparam int N_LATCH_PORT   = 2;      // 0..3  Zemina90 ROM in A and B
     localparam int N_MEM_MAPPER   = 2;      // 0..3  machine + MFRSD in slot A
