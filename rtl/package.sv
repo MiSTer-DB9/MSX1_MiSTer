@@ -38,6 +38,7 @@ typedef enum logic [5:0] {MAPPER_NONE, MAPPER_OFFSET, MAPPER_ASCII16, MAPPER_RTY
                           MAPPER_NEO8, MAPPER_NEO16,
                           MAPPER_MSXDOS2,
                           MAPPER_KUC, MAPPER_YAMANOOTO,
+                          MAPPER_HALNOTE,
                           MAPPER_UNUSED} mapper_typ_t;
 typedef enum logic [3:0] {BLOCK_RAM, BLOCK_ROM, BLOCK_SRAM, BLOCK_DEVICE, BLOCK_MAPPER, BLOCK_CART, BLOCK_REF_MEM, BLOCK_REF_DEV, BLOCK_IO_DEVICE, BLOCK_EXPANDER, BLOCK_REF_SHARED_MEM, BLOCK_FLASH} block_t;
 typedef enum logic [2:0] {CONF_BLOCK, CONF_DEVICE, CONF_LAYOUT, CONF_CARTRIGE, CONF_BLOCK_FW, CONF_UNUSED5, CONF_UNUSED6, CONF_END} conf_t;
@@ -447,6 +448,7 @@ package MSX;
         logic           mouse_port;     // OCM: PS/2 mouse on port 1 (0) / 2 (1)
         logic           ocm_r800;       // OCM: CPU type R800 (MULUB / MULUW)
         logic           firmware_sw;    // firmware switch on (turbo R S1990 register 5, Matsushita 41h)
+        logic     [1:0] r800_fast;      // R800 bus of msx_cpu: 2 speed of a real R800, 1 Z80 T states per clk, 0 at 10.7 MHz
         logic           osd_pause;      // OSD open and "Pause when OSD open" on
     } user_config_t;    
     
@@ -566,7 +568,7 @@ package MSX;
     // The one place to set how many copies of a device are built (io_device keeps 3 slots
     // per type). Values = what the machine XMLs and the OSD cartridges need, see
     // doc/pocty-zarizeni.md. memory_upload stops a configuration needing more copies with
-    // ERR_MISSING_SOURCE ("Device not in this core build").
+    // ERR_DEVICE_MISSING, one needing a device type with no copy with ERR_MISSING_SOURCE.
     localparam int N_OPLL         = 2;      // 0..3  machine + FM-PAC, or FM-PAC in A and B
     localparam int N_OPM          = 1;      // 0..3
     localparam int N_SCC          = 2;      // 0..2

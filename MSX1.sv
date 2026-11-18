@@ -160,7 +160,7 @@ reset_sync rst_sync_sdram (.clk(clk_sdram), .arst(~locked_sdram),          .rst(
 //  [11]     OCM internal mapper size
 //  [12]     OCM reset after SD mount
 //  [13]     OCM joysticks swap
-//  [14]     OCM mouse port
+//  [14]     mouse port
 //  [15]     OCM CPU speed
 //  [16]     OCM CPU type (R800: MULUB / MULUW)
 //  [20:17]  slot A cartridge type (not OCM)
@@ -221,16 +221,17 @@ localparam CONF_STR = {
    "h3O[11],Internal Mapper,2048KB RAM,4096KB RAM;",
    "h3-;",
    "h3O[13],Joysticks Swap,No,Yes;",
-   "h3O[14],Mouse,Port 1,Port 2;",
    // firmware switch (hC): machines with the S1990 or the Matsushita switched I/O
    "hC-;",
    "hCO[26],Firmware switch,Off,On;",
+   "hCO[56:55],R800 speed,Real,T-states,10.7MHz;",
    "H3-;",
    "H3O[40],Tape Input,File,ADC;",
    "H3O[42],Tape Monitor,On,Off;",
    "HBF5,CAS,Cas File,31700000;",
    "HBT9,Tape Rewind;",
    "-;",
+   "O[14],Mouse,Port 1,Port 2;",
    "P2,MIDI;",
    "P2O[44:43],User Port,MT32-pi,MIDI In/Out,Off;",
    "hDP2-;",
@@ -392,7 +393,7 @@ memory_bus_if    memory_bus_sdram_ch1();
 memory_bus_if    memory_bus_sdram_ch2();
 memory_bus_if    memory_bus_sdram_ch3();
 wave_bus_if      wave_bus_sdram_ch4();
-wire             cpu_phase_next;
+wire             cpu_phase_next, cpu_acc_start, cpu_mem_free;
 wire             pause;
 wire       [5:0] joy[2];
 
@@ -446,6 +447,8 @@ msx_system msx_system
    .wave_bus_sdram_ch4(wave_bus_sdram_ch4),
    .cpu_phase(),
    .cpu_phase_next(cpu_phase_next),
+   .cpu_acc_start(cpu_acc_start),
+   .cpu_mem_free(cpu_mem_free),
    .ddr3_addr(ddr3_addr),
    .ddr3_rd(ddr3_rd),
    .ddr3_we(ddr3_we),
@@ -713,7 +716,9 @@ sdram sdram
    .ch4_req  (wave_bus_sdram_ch4.req),
    .ch4_rnw  (~wave_bus_sdram_ch4.we),
    .ch4_done (wave_bus_sdram_ch4.ack),
-   .cpu_phase_next(cpu_phase_next)
+   .cpu_phase_next(cpu_phase_next),
+   .ch1_new(cpu_acc_start),
+   .ch1_free(cpu_mem_free)
 );
 
 endmodule

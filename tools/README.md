@@ -11,6 +11,8 @@ Helper tools of the MSX core for MiSTer. Back to the [main Readme](../Readme.md)
 | [CreateKeyMap](CreateKeyMap/README.md) | Builds the PS/2 to MSX keyboard tables | developers |
 | [vdptest](vdptest/README.md) | VDP timing test ROMs | developers and testers |
 | [miditest](miditest/README.md) | MIDI output test ROM (MT32-pi, MidiLink) | testers |
+| [vdpcmd](vdpcmd/README.md) | bengalack's vdpcmd (VDP command speed) as a ROM, without MSX-DOS | developers and testers |
+| [pcmtest](pcmtest/README.md) | turbo R PCM played as in the game Criterion, counts skipped samples | developers and testers |
 
 ## Quick start for users
 
@@ -25,7 +27,7 @@ Copy these files to the SD card into `/media/fat/games/MSX1/`:
 Steps:
 1. Install Python 3.
 2. Put the BIOS/firmware ROM dumps into `tools/CreateMSXpack/ROM/` (you must supply them yourself;
-   only the C-BIOS ROMs are included).
+   only the C-BIOS ROMs and the 1chipMSX (OCM) IPL ROM are included).
 3. In `tools/CreateMSXpack` run `python createComp.py` and `python createDev.py`; the packs appear
    in `MSX/`. Details and the meaning of the console messages are in the
    [CreateMSXpack README](CreateMSXpack/README.md).
@@ -82,6 +84,25 @@ The ROM is built and in the repository; load it as a game ROM into slot A, best 
 Start: `sh tools/miditest/build.sh` (rebuild only).
 Documentation: [README](miditest/README.md) | [README.cs](miditest/README.cs.md).
 
+### vdpcmd
+
+bengalack's [vdpcmd](https://github.com/bengalack/vdpcmd) as a cartridge ROM (`vdpcmd.rom`): it
+measures how many pixels the VDP command engine handles in one frame and compares them with real
+machines. The original DOS program runs unchanged inside the ROM, so no MSX-DOS is needed. The ROM
+is built and in the repository; load it as a game ROM into slot A.
+
+Start: `sh tools/vdpcmd/build.sh` (rebuild only).
+Documentation: [README](vdpcmd/README.md) | [README.cs](vdpcmd/README.cs.md).
+
+### pcmtest
+
+A test ROM (`pcmtest.rom`) for the turbo R PCM: plays sounds of the game Criterion with its own
+player (S1990 timer, 7990 Hz, late samples skipped), optionally with VDP load, and shows how many
+samples were played and skipped. The sounds come from the game ROM and are not in the repository.
+
+Start: `python tools/pcmtest/mkraw.py <Criterion ROM>`, then `sh tools/pcmtest/build.sh`.
+Documentation: [README](pcmtest/README.md) | [README.cs](pcmtest/README.cs.md).
+
 ## For developers
 
 - **New machine model or extension cartridge:** see
@@ -89,9 +110,10 @@ Documentation: [README](miditest/README.md) | [README.cs](miditest/README.cs.md)
   ([Česky](CreateMSXpack/DEVELOPERS.cs.md)).
 - **New keyboard layout:** [CreateKeyMap](CreateKeyMap/README.md).
 - **Mapper of a specific ROM (override) or a new mapper name:** [CreateCRC](CreateCRC/README.md).
-- **VDP timing checks:** [vdptest](vdptest/README.md).
+- **VDP timing checks:** [vdptest](vdptest/README.md), [vdpcmd](vdpcmd/README.md).
 - **MIDI output checks:** [miditest](miditest/README.md).
 
 The Python scripts use only the standard library, except the debugging helper
-`CreateKeyMap/scancode_debugger.py` (needs the `keyboard` package). The scripts must be run from
-their own folder, because they open their data files by relative name.
+`CreateKeyMap/scancode_debugger.py` (needs the `keyboard` package). `createKeyMap.py`,
+`createComp.py` and `createDev.py` must be run from their own folder, because they open their data
+files by relative name.
