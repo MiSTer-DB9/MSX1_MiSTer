@@ -69,6 +69,7 @@
 //  +m02 : Savestate ports REG / DIRSet / DIR as T80.vhd of the MiSTer T80 (T80(c) version 350,
 //         Sorgelig); DIRSet also clears Alternate, the pending write-back and the INT/NMI/HALT
 //         state, so the core can resume fetching at the loaded PC (Z80 / R800 switch, turbo R)
+//  +m04 : HINT output for the R800 pacing in msx_cpu; TRIM: machine cycles without idle T states
 //  +m03 : CMOS input (Z80 inside a Toshiba MSX-Engine): OUT (C),0 writes FFh, SCF / CCF keep Y;
 //         SCF / CCF take X (Y) from F | A, the R800 keeps X, Y (and H for CCF), as openMSX
 
@@ -108,7 +109,11 @@ module TV80#( parameter Mode      = 0,
     output              IntCycle_n,
     input               R800_mode,
     input               CMOS,
+    input               TRIM,           // no idle T states (R800 on the single phase bus)
     output        [1:0] MULU,           // R800 multiply running (bit 0), MULUW (bit 1)
+    // {jump taken, IX / IY, ISet, IR, operand fetch (PC + 1), last T state of the machine cycle,
+    //  last T state of the instruction}
+    output       [14:0] HINT,
     output              IntE,
     output              Stop,
     // Savestate (MiSTer T80 layout): IFF2, IFF1, IM, IY, HL', DE', BC', IX, HL, DE, BC, PC, SP, R, I, F', A', F, A
@@ -147,6 +152,9 @@ module TV80#( parameter Mode      = 0,
     logic               Alternate;
 
     // Help Registers
+    logic        [15:0] MEMPTR;                                                                    // WZ of the Z80 (BIT n,(HL))
+    logic         [7:0] bio_F;                                                                     // flags of a block I/O instruction
+    logic               bio_set;                                                                   // set them (the next instruction starts)
     logic        [15:0] TmpAddr;                                                                   // Temporary address register
     logic         [7:0] IR;                                                                        // Instruction register
     logic         [1:0] ISet;                                                                      // Instruction set selector
@@ -203,6 +211,7 @@ module TV80#( parameter Mode      = 0,
 
     // Micro code outputs
     wire         [2:0] MCycles_d;
+    wire         [2:0] TStates_m;      // T states of the Z80
     wire         [2:0] TStates;
     logic               IntCycle;
     logic               NMICycle;
@@ -245,6 +254,7 @@ module TV80#( parameter Mode      = 0,
     wire               I_RLD;
     wire               I_RRD;
     wire               I_INRC;
+    wire               I_EXSP;
     wire               I_MULUB;
     wire               I_MULU;
     wire               SetDI;
@@ -273,7 +283,7 @@ module TV80#( parameter Mode      = 0,
         .IntCycle(IntCycle),
         .XY_State(XY_State),
         .MCycles(MCycles_d),
-        .TStates(TStates),
+        .TStates(TStates_m),
         .Prefix(Prefix),
         .Inc_PC(Inc_PC),
         .Inc_WZ(Inc_WZ),
@@ -313,6 +323,7 @@ module TV80#( parameter Mode      = 0,
         .I_RLD(I_RLD),
         .I_RRD(I_RRD),
         .I_INRC(I_INRC),
+        .I_EXSP(I_EXSP),
         .I_MULUB(I_MULUB),
         .I_MULU(I_MULU),
         .SetDI(SetDI),
@@ -345,11 +356,31 @@ module TV80#( parameter Mode      = 0,
         .BusA(BusA),
         .BusB(BusB),
         .F_In(F),
+        .R800(R800_mode),
+        .MP_YX(XY_State != 2'b00 ? {TmpAddr[13], TmpAddr[11]} : {MEMPTR[13], MEMPTR[11]}),
+        .XY_Ind(XY_State != 2'b00),
         .Q(ALU_Q),
         .F_Out(F_Out)
     );
 
+
     assign ClkEn           = CEN & ~BusAck;
+    // TRIM: an M1 ends in T3, with the register addresses of the instruction just decoded used
+    // at once (not through RegAddr*_r); an M1 with work in T4 (SP, EX DE,HL) keeps its T states.
+    // Other cycles end in T3; I/O cycles, the interrupt acknowledge and the multiply keep theirs.
+    wire               M1_T4    = IncDec_16[2:0] == 3'b111 || ExchangeDH;
+    wire               Trim     = TRIM && ~I_MULU && ~IntCycle && ~NMICycle;
+    wire               Short_M1 = Trim && MCycle == 3'd1 && ~M1_T4;
+    assign TStates         = ~Trim            ? TStates_m :
+                             MCycle == 3'd1   ? (M1_T4 ? TStates_m : 3'd3) :
+                             IORQ_i           ? TStates_m : 3'd3;
+    wire               Short_T3 = Short_M1 && TState == 3'd3;
+    // in that T3 the registers below still hold what the instruction before left
+    wire               No_BTR_n = (I_BT  & (~IR[4] | ~F[Flag_P])) |
+                                  (I_BC  & (~IR[4] | F[Flag_Z] | ~F[Flag_P])) |
+                                  (I_BTR & (~IR[4] | F[Flag_Z]));
+    wire         [2:0] MCycles_e = Short_T3 ? MCycles_d : MCycles;
+    wire               No_BTR_e  = Short_T3 ? No_BTR_n  : No_BTR;
     assign T_Res           = TState == TStates;
     assign NextIs_XY_Fetch = XY_State != 2'b00 && ~XY_Ind && (   (Set_Addr_To == aXY )
                                                               || (MCycle == 3'd1 && IR == 8'b11001011)
@@ -425,8 +456,8 @@ module TV80#( parameter Mode      = 0,
 
                 Z16_r <= ISet == 2'b10 && ~ALU_Op[2] && ALU_Op[0] && MCycle == 3'd3;
 
-                if (MCycle == 3'd1 && ~TState[2]) begin
-                    if (TState == 3'd2 && Wait_i) begin
+                if (MCycle == 3'd1 && ~TState[2] && ~Short_T3) begin
+                    if (TState == 3'd2 && Wait_i && ~Auto_Wait) begin   // not in the wait states of the acknowledge (R + 1 once)
                         if (Mode < 2) begin
                             A      <= {I, R};
                             R[6:0] <= R[6:0] + 7'b1;
@@ -669,7 +700,156 @@ module TV80#( parameter Mode      = 0,
                     if (XYbit_undoc)
                         DO <= ALU_Q;
                 end
+
+                if (bio_set)                    // INI / OUTI ... ended: their flags (bio_F)
+                    F <= bio_F;
             end
+        end
+    end
+
+    // ---- MEMPTR (WZ) and the flags of block I/O -------------------------------------------
+    // MEMPTR is followed per instruction as openMSX CPUCore (setMemPtr) does, from what the
+    // instruction did: its reads, writes and I/O, the registers at its M1 and the address of
+    // the next M1. It is set when the next instruction starts; only BIT n,(HL) reads it (and
+    // DDCB BIT reads IX+d from TmpAddr). The R800 has none (openMSX R800::getMemPtr), so it is
+    // kept while the R800 runs. The address and data paths of the core are not involved.
+    logic [15:0] s_bc, s_hl, s_xy;          // registers at the M1 of the instruction
+    logic  [7:0] s_f;
+    logic [15:0] p_addr;                    // address of its first byte
+    logic        p_int;                     // it is an interrupt acknowledge
+    logic  [1:0] n_rd;                      // reads (non M1), counted up to 3
+    logic [15:0] rd_a0, rd_a2, wr_a0, io_a;
+    logic  [7:0] rd_d0, rd_d1, wr_d0, io_d;
+    logic        jumped;                    // JR / DJNZ taken
+    logic        wr_seen;                   // a write was done: wr_a0 / wr_d0 hold the first
+
+    function automatic logic hl_mem(input logic [7:0] op);  // (HL) operand: (IX+d) with DD / FD
+        hl_mem = op == 8'h34 || op == 8'h35 || op == 8'h36 ||
+                 (op[7:6] == 2'b01 && (op[2:0] == 3'b110 || op[5:3] == 3'b110) && op != 8'h76) ||
+                 (op[7:6] == 2'b10 && op[2:0] == 3'b110);
+    endfunction
+
+    // the next instruction starts (its first M1; IR, ISet, XY_State still of the one before)
+    wire        ins_start = ClkEn && MCycle == 3'd1 && TState == 3'd2 && ~Short_T3 && Wait_i && ~Auto_Wait &&
+                            Prefix == 2'b00;
+    wire [15:0] nxt       = A;              // address of that M1
+    wire [15:0] xy_d      = s_xy + {{8{rd_d0[7]}}, rd_d0};
+
+    logic [15:0] mp_new;
+    always_comb begin
+        mp_new = MEMPTR;
+        if (p_int && IR == 8'h00) mp_new = nxt;                     // IM2, NMI
+        case (ISet)
+            2'b00: begin
+                if (XY_State != 2'b00 && hl_mem(IR)) mp_new = xy_d; // (IX+d)
+                casez (IR)
+                    8'b000?1010: mp_new = rd_a0 + 16'd1;            // LD A,(BC) / (DE)
+                    8'b000?0010,
+                    8'b00110010: mp_new = {wr_d0, wr_a0[7:0] + 8'd1};   // LD (BC) / (DE) / (nn),A
+                    8'b00111010,
+                    8'b00101010: mp_new = rd_a2 + 16'd1;            // LD A,(nn), LD HL,(nn)
+                    8'b00100010: mp_new = wr_a0 + 16'd1;            // LD (nn),HL
+                    8'b11000011, 8'b11???010,
+                    8'b11001101, 8'b11???100: mp_new = {rd_d1, rd_d0};  // JP, CALL (taken or not)
+                    8'b00011000, 8'b001??000,
+                    8'b00010000: if (jumped) mp_new = nxt;          // JR, DJNZ taken
+                    8'b11001001,
+                    8'b11???111: mp_new = nxt;                      // RET, RST
+                    8'b11???000: if (n_rd != 2'd0) mp_new = nxt;    // RET cc taken
+                    8'b11100011: mp_new = {rd_d1, rd_d0};           // EX (SP),HL: the new HL
+                    8'b00??1001: mp_new = (XY_State != 2'b00 ? s_xy : s_hl) + 16'd1;  // ADD HL,rp
+                    8'b11011011: mp_new = io_a + 16'd1;             // IN A,(n)
+                    8'b11010011: mp_new = {io_a[15:8], io_a[7:0] + 8'd1};   // OUT (n),A
+                    default: ;
+                endcase
+            end
+            2'b01: if (XY_State != 2'b00) mp_new = xy_d;            // DDCB
+            2'b10:
+                casez (IR)
+                    8'b01???000, 8'b01???001: mp_new = s_bc + 16'd1;        // IN r,(C), OUT (C),r
+                    8'b01???010:  mp_new = s_hl + 16'd1;                    // SBC / ADC HL,rp
+                    8'b01??0011:  mp_new = wr_a0 + 16'd1;                   // LD (nn),rp
+                    8'b01??1011:  mp_new = rd_a2 + 16'd1;                   // LD rp,(nn)
+                    8'b01???101:  mp_new = nxt;                             // RETN, RETI
+                    8'b0110?111:  mp_new = s_hl + 16'd1;                    // RRD, RLD
+                    8'b1011?000:  if (nxt == p_addr) mp_new = p_addr + 16'd1;   // LDIR / LDDR repeat
+                    8'b101??001:  mp_new = (IR[4] && nxt == p_addr) ? p_addr + 16'd1 :
+                                           IR[3] ? MEMPTR - 16'd1 : MEMPTR + 16'd1; // CPI, CPD (R)
+                    8'b101??010:  mp_new = IR[3] ? s_bc - 16'd1 : s_bc + 16'd1;  // INI, IND (R)
+                    8'b101??011:  mp_new = IR[3] ? s_bc - 16'h0101 : s_bc - 16'h00FF;  // OUTI, OUTD: B - 1
+                    default: ;
+                endcase
+            default: ;
+        endcase
+    end
+
+    // INI / IND / OUTI / OUTD (and repeated). Z80: N = bit 7 of the data, H = C = carry of
+    // data + (C +- 1) (IN) or + L after the step (OUT), P = parity of ((k & 7) ^ B), S Z X Y of B.
+    // R800: only Z (of B) and N = 1 change. (openMSX CPUCore BLOCK_IN / BLOCK_OUT)
+    wire        bio     = ISet == 2'b10 && IR[7:5] == 3'b101 && IR[2:1] == 2'b01;
+    wire  [7:0] bio_val = IR[0] ? rd_d0 : io_d;
+    wire  [7:0] bio_b   = s_bc[15:8] - 8'd1;
+    wire  [7:0] bio_add = (IR[0] ? s_hl[7:0] : s_bc[7:0]) + (IR[3] ? 8'hFF : 8'h01);
+    wire  [8:0] bio_k   = {1'b0, bio_val} + {1'b0, bio_add};
+    always_comb begin
+        bio_F = s_f;
+        bio_F[Flag_Z] = bio_b == 8'd0;
+        bio_F[Flag_N] = 1'b1;
+        if (~R800_mode) begin
+            bio_F[Flag_S] = bio_b[7];
+            bio_F[Flag_Y] = bio_b[5];
+            bio_F[Flag_X] = bio_b[3];
+            bio_F[Flag_H] = bio_k[8];
+            bio_F[Flag_C] = bio_k[8];
+            bio_F[Flag_P] = ~^({5'd0, bio_k[2:0]} ^ bio_b);
+            bio_F[Flag_N] = bio_val[7];
+        end
+    end
+    assign      bio_set = ins_start && bio;
+
+    always_ff @(posedge CLK_n) begin
+        if (~RESET_n) begin
+            MEMPTR  <= 16'hFFFF;
+            n_rd    <= '0;
+            jumped  <= '0;
+            wr_seen <= '0;
+            p_int   <= '0;
+        end else if (DIRSet) begin              // other CPU: nothing of the last instruction
+            n_rd    <= '0;
+            jumped  <= '0;
+            wr_seen <= '0;
+            p_int   <= '0;
+        end else if (ClkEn) begin
+            if (ins_start) begin
+                if (~R800_mode) MEMPTR <= mp_new;
+                p_addr <= nxt;
+                p_int  <= IntCycle || NMICycle;
+                n_rd    <= '0;
+                jumped  <= '0;
+                wr_seen <= '0;
+            end
+            if (MCycle == 3'd1 && T_Res) begin
+                s_bc <= DOR_logical[15:0];
+                s_hl <= DOR_logical[47:32];
+                s_xy <= XY_State[1] ? DOR_logical[127:112] : DOR_logical[63:48];
+                s_f  <= F;
+            end
+            if (MCycle != 3'd1 && T_Res && ~NoRead) begin
+                if (IORQ_i) begin
+                    io_a <= A;
+                    io_d <= Write ? DO : DI_Reg;
+                end else if (Write) begin
+                    if (~wr_seen) begin wr_a0 <= A; wr_d0 <= DO; end
+                    wr_seen <= '1;
+                end else begin
+                    if (n_rd == 2'd0) begin rd_a0 <= A; rd_d0 <= DI_Reg; end
+                    if (n_rd == 2'd1) rd_d1 <= DI_Reg;
+                    if (n_rd == 2'd2) rd_a2 <= A;
+                    if (n_rd != 2'd3) n_rd <= n_rd + 2'd1;
+                end
+            end
+            if (JumpE && TState == 3'd2 && Wait_i && MCycle != 3'd1)
+                jumped <= '1;
         end
     end
 
@@ -704,25 +884,9 @@ module TV80#( parameter Mode      = 0,
 // BC('), DE('), HL('), IX and IY
     always_ff @(posedge CLK_n) begin
         if (ClkEn) begin
-            // Bus A / Write
-            RegAddrA_r <= {Alternate, Set_BusA_To[2:1]};
-            if (~XY_Ind && XY_State != 2'b00 && Set_BusA_To[2:1] == 2'b10)
-                RegAddrA_r <= {XY_State[1], 2'b11};
-
-            // Bus B
-            RegAddrB_r <= {Alternate, Set_BusB_To[2:1]};
-            if (~XY_Ind && XY_State != 2'b00 && Set_BusB_To[2:1] == 2'b10)
-                RegAddrB_r <= {XY_State[1], 2'b11};
-
-            // Address from register
-            RegAddrC <= {Alternate, Set_Addr_To[1:0]};
-
-            // Jump (HL), LD SP,HL
-            if (JumpXY || LDSPHL)
-                RegAddrC <= {Alternate, 2'b10};
-
-            if (((JumpXY || LDSPHL) && XY_State != 2'b00) || (MCycle == 3'd6))
-                RegAddrC <= {XY_State[1], 2'b11};
+            RegAddrA_r <= RegAddrA_n;
+            RegAddrB_r <= RegAddrB_n;
+            RegAddrC   <= RegAddrC_n;
 
             if (I_DJNZ && Save_ALU_r && Mode < 2)
                 IncDecZ <= F_Out[Flag_Z];
@@ -734,6 +898,30 @@ module TV80#( parameter Mode      = 0,
             // RegBusA to RegBusA_r
             RegBusA_r <= RegBusA;
         end
+    end
+
+    // what RegAddrA_r / RegAddrB_r / RegAddrC take at the next clock
+    logic [2:0] RegAddrA_n, RegAddrB_n, RegAddrC_n;
+    always_comb begin
+        // Bus A / Write
+        RegAddrA_n = {Alternate, Set_BusA_To[2:1]};
+        if (~XY_Ind && XY_State != 2'b00 && Set_BusA_To[2:1] == 2'b10)
+            RegAddrA_n = {XY_State[1], 2'b11};
+
+        // Bus B
+        RegAddrB_n = {Alternate, Set_BusB_To[2:1]};
+        if (~XY_Ind && XY_State != 2'b00 && Set_BusB_To[2:1] == 2'b10)
+            RegAddrB_n = {XY_State[1], 2'b11};
+
+        // Address from register
+        RegAddrC_n = {Alternate, Set_Addr_To[1:0]};
+
+        // Jump (HL), LD SP,HL
+        if (JumpXY || LDSPHL)
+            RegAddrC_n = {Alternate, 2'b10};
+
+        if (((JumpXY || LDSPHL) && XY_State != 2'b00) || (MCycle == 3'd6))
+            RegAddrC_n = {XY_State[1], 2'b11};
     end
 
     always_comb begin
@@ -752,10 +940,10 @@ module TV80#( parameter Mode      = 0,
             RegAddrA = {Alternate, 2'b01};
         end
         else begin                                                                                          // Bus A / Write
-            RegAddrA = RegAddrA_r;
+            RegAddrA = Short_T3 ? RegAddrA_n : RegAddrA_r;
         end
 
-        RegAddrB = ExchangeDH && TState == 3'd3 ? {Alternate, 2'b01} : RegAddrB_r;
+        RegAddrB = ExchangeDH && TState == 3'd3 ? {Alternate, 2'b01} : Short_T3 ? RegAddrB_n : RegAddrB_r;
 
         ID16 = IncDec_16[3] ? $signed(RegBusA) - 16'sd1 : $signed(RegBusA) + 16'sd1;
     end
@@ -781,6 +969,11 @@ module TV80#( parameter Mode      = 0,
         end
 
         if (ExchangeDH && (TState == 3'd3 || TState == 3'd4)) begin
+            RegWEH = '1;
+            RegWEL = '1;
+        end
+
+        if (I_EXSP && TState == 3'd3) begin                                     // EX (SP),HL: HL <= WZ
             RegWEH = '1;
             RegWEL = '1;
         end
@@ -824,6 +1017,11 @@ module TV80#( parameter Mode      = 0,
             RegDIH = ID16[15:8];
             RegDIL = ID16[7:0];
         end
+
+        if (I_EXSP && TState == 3'd3) begin
+            RegDIH = TmpAddr[15:8];
+            RegDIL = TmpAddr[7:0];
+        end
     end
 
     TV80_Reg Regs (
@@ -833,7 +1031,7 @@ module TV80#( parameter Mode      = 0,
         .WEL(RegWEL),
         .AddrA(RegAddrA),
         .AddrB(RegAddrB),
-        .AddrC(RegAddrC),
+        .AddrC(Short_T3 ? RegAddrC_n : RegAddrC),
         .DIH(RegDIH),
         .DIL(RegDIL),
         .DOAH(RegBusA[15:8]),
@@ -888,7 +1086,7 @@ module TV80#( parameter Mode      = 0,
         if (~RESET_n)
             RFSH_n <= '1;
         else if (CEN) begin  // was CLK_n && CEN: clock must not be used as data
-            if (MCycle == 3'b001 && ((TState == 3'd2 && Wait_i) || TState == 3'd3))
+            if (MCycle == 3'b001 && ((TState == 3'd2 && Wait_i && ~Auto_Wait) || TState == 3'd3))
                 RFSH_n <= '0;
             else
                 RFSH_n <= '1;
@@ -902,6 +1100,10 @@ module TV80#( parameter Mode      = 0,
     assign BUSAK_n = ~BusAck;
     assign IntCycle_n = ~IntCycle;
     assign MULU = {MULU_W, I_MULU};
+    // the same condition as in the state machine below: the next CEN starts an M1 cycle
+    wire End_Instr = ~NextIs_XY_Fetch && ~((MCycle == 3'd7) || (MCycle == 3'd6 && Mode == 1 && ISet != 2'b01)) &&
+                     (MCycle == MCycles_e || No_BTR_e || (MCycle == 3'd2 && I_DJNZ && IncDecZ));
+    assign HINT = {Jump | JumpE | JumpXY | Call | RstP, XY_State != 2'b00, ISet, IR, Inc_PC, T_Res, T_Res && End_Instr};
     assign IntE = IntE_FF1;
     assign IORQ = IORQ_i;
     assign Stop = I_DJNZ;
@@ -956,9 +1158,7 @@ module TV80#( parameter Mode      = 0,
             else
                 Auto_Wait_t1 <= Auto_Wait | IORQ_i;
 
-            No_BTR <= (I_BT  & (~IR[4] | ~F[Flag_P])) |
-                      (I_BC  & (~IR[4] | F[Flag_Z] | ~F[Flag_P])) |
-                      (I_BTR & (~IR[4] | F[Flag_Z]));
+            No_BTR <= No_BTR_n;
 
             if (TState == 3'd2) begin
                 if (SetEI) begin
@@ -1002,7 +1202,7 @@ module TV80#( parameter Mode      = 0,
                                 Pre_XY_F_M <= 3'b010;
                         end else if ((MCycle == 3'd7) || (MCycle == 3'd6 && Mode == 1 && ISet != 2'b01))
                             MCycle <= Pre_XY_F_M + 3'd1;
-                        else if (MCycle == MCycles || No_BTR || (MCycle == 3'd2 && I_DJNZ && IncDecZ)) begin
+                        else if (MCycle == MCycles_e || No_BTR_e || (MCycle == 3'd2 && I_DJNZ && IncDecZ)) begin
                             M1_n <= '0;
                             MCycle <= 3'd1;
                             IntCycle <= '0;

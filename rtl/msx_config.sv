@@ -92,6 +92,8 @@ assign msx_user_config.mouse_port            = HPS_status[14];
 assign msx_user_config.ocm_dip  = {1'b1, HPS_status[11], HPS_status[24:23], HPS_status[22], 2'b11, HPS_status[15]};
 assign msx_user_config.ocm_r800 = ocmMode && HPS_status[16];
 assign msx_user_config.firmware_sw = HPS_status[26];
+// OSD R800 speed: Real, T-states, 10.7MHz
+assign msx_user_config.r800_fast   = HPS_status[56:55] == 2'd0 ? 2'd2 : HPS_status[56:55] == 2'd1 ? 2'd1 : 2'd0;
 
 logic [1:0] osd_sync = '0;
 always_ff @(posedge clk) osd_sync <= {osd_sync[0], osd_status};
@@ -107,6 +109,15 @@ always_ff @(posedge clk) begin
     if (reload) lastConfig <= act_config;
 end
 
-assign reload = ~reset & lastConfig != act_config;
+// 1chipMSX: a cold reset (MiSTer menu, status[0]) loads the configuration again, so the RAM
+// blocks are filled as after power-on. OCM / MSX_MiSTer clear ESE-SCC1/2 and ESE-RAM on a cold
+// reset: no ROM left by SofaRun starts by its "AB", the IPL loads the BIOS from the SD again.
+logic cold_pend = 1'b0;
+always_ff @(posedge clk) begin
+    if (HPS_status[0] && ocmMode) cold_pend <= 1'b1;
+    else if (reload)              cold_pend <= 1'b0;
+end
+
+assign reload = ~reset & (lastConfig != act_config || (cold_pend && ~HPS_status[0]));
 
 endmodule

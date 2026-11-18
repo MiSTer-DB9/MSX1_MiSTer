@@ -28,6 +28,9 @@
 // Pause key (hps_io event 377h) at that time and checks that the BIOS lights the pause LED (A7h
 // bit 0) and turns it off after a second press 500 ms later. The FS-A1ST BIOS pauses BASIC in
 // software (A7h = 81h); when it enables the hardware pause (bit 1) the CPU must stop as well.
+// +pcmlog=<file>: every write to the PCM ports A4h / A5h (time, port, data, last M1, then since
+// the write before: M1 cycles, VDP accesses, clk held for the R800 VDP gap).
+// +r800speed=<n>: OSD R800 speed (status[56:55]): 0 Real, 1 T-states, 2 10.7MHz.
 // Other machines: +pause_ms=<ms> the Pause key pauses the machine (CPU stopped, sound muted,
 // pause LED), the second press 500 ms later resumes it.
 // +ch1_lat=2: SDRAM read data of the CPU valid on the 2nd clk_core edge (worst case of the
@@ -35,6 +38,7 @@
 // +osd_ms=<ms>: the OSD opens at that time with "Pause when OSD open" off (the machine runs),
 // 200 ms later the option goes on (paused), 400 ms later the OSD closes (runs again).
 // Paused (CPU held, also the turbo R hardware pause) = msx_system `pause` (HDMI freeze) on.
+// +mouse_ms=<ms>: the PS/2 mouse moves at that time; 100 ms later port 1 of the PSG must be the mouse.
 // +reset_ms=<ms>: Reset from the OSD (status[21], 1 ms) at that time; +expect counts only once the
 // screen has been without it after the reset.
 // Run: wsl.exe -- bash rtl/tb/run_machine_boot.sh <machine.msx> <image.dsk> [expected text]
@@ -77,6 +81,7 @@ wire    [7:0] ddr3_dout, ddr3_din;
 
 block_device_if block_device_FDD[2*MSX::N_FDC]();
 block_device_if block_device_SD();
+logic    [24:0] ps2_mouse = '0;                          // +mouse_ms: {toggle, dy, dx, flags}
 logic    [10:0] ps2_key = '0;                           // +key: {toggle, down, extended, code}
 ext_sd_card_if  ext_SD_card_bus();
 memory_bus_if   sd_ch1(), sd_ch2(), sd_ch3();
@@ -86,7 +91,7 @@ wire            cpu_phase;
 msx_system sys (
     .clock_bus(clock_bus), .rst_core_async(rst_core_async), .reset(reset),
     .status(status), .status_menumask(status_menumask), .info_req(info_req), .info(info),
-    .ps2_key(ps2_key), .ps2_mouse(25'd0), .joy(joy), .ioctl_download(ioctl_download), .ioctl_index(ioctl_index),
+    .ps2_key(ps2_key), .ps2_mouse(ps2_mouse), .joy(joy), .ioctl_download(ioctl_download), .ioctl_index(ioctl_index),
     .ioctl_addr(ioctl_addr), .rtc(65'd0), .sdram_sz(16'h8002), .uart_speed(32'd115200),
     .img_readonly(1'b0), .img_size(64'd0), .sd_img_mounted(1'b0),
     .block_device_FDD(block_device_FDD), .msx_config(msx_config),
@@ -302,6 +307,12 @@ logic        r800_q = 0, dram_q = 0, hold_q = 0;
 logic  [1:0] sel_q = '0;
 int          sel_log = 0, io_holds = 0;
 
+// +pcmlog=<file>: every write to the turbo R PCM (A4h / A5h): time, port, data, last M1, and since
+// the write before: M1 cycles, VDP port accesses, clk the CPU was held for the VDP gap (io_hold)
+int          pcmlog_fd = 0;
+int          pcm_m1 = 0, pcm_vdp = 0, pcm_hold = 0;
+initial begin string f; if ($value$plusargs("pcmlog=%s", f)) pcmlog_fd = $fopen(f, "w"); end
+
 // +sramlog=<n>: the first n writes to the SRAM of a mapper (CPU address, SRAM offset, data)
 int   sramlog_n = 0, sram_wr = 0;
 initial void'($value$plusargs("sramlog=%d", sramlog_n));
@@ -352,6 +363,15 @@ always @(posedge clk_core) begin
         && sys.io_device[DEV_S1990][0].enable) begin
         s1990_wr++;
         if (s1990_wr <= 40) $display("%0t S1990 E5 <= %02h (last M1 %04h)", $time, sys.MSX.cpu_bus.data, last_m1);
+    end
+    if (access && sys.MSX.cpu_bus.iorq && !sys.MSX.cpu_bus.m1 && sys.MSX.cpu_bus.addr[7:2] == 6'b100110) pcm_vdp++;
+    if (access && sys.MSX.cpu_bus.mreq && sys.MSX.cpu_bus.m1) pcm_m1++;
+    if (sys.MSX.cpu.io_hold) pcm_hold++;
+    if (pcmlog_fd != 0 && access && sys.MSX.cpu_bus.iorq && !sys.MSX.cpu_bus.m1 && sys.MSX.cpu_bus.wr
+        && sys.MSX.cpu_bus.addr[7:1] == 7'h52) begin
+        $fwrite(pcmlog_fd, "%0t %02h %02h %04h %0d %0d %0d\n", $time, sys.MSX.cpu_bus.addr[7:0], sys.MSX.cpu_bus.data,
+                last_m1, pcm_m1, pcm_vdp, pcm_hold);
+        pcm_m1 = 0; pcm_vdp = 0; pcm_hold = 0;
     end
     if (access && sys.MSX.msx_slots.main_cs) begin
         if (sys.MSX.cpu_bus.wr) main_wr++; else main_rd++;
@@ -652,8 +672,8 @@ endtask
 initial begin
     string pack_name, dsk_name, expect_txt = "", last = "", now, dump, fname;
     int frame_ms = 0, frame_every = 0, frame_n = 10;
-    int fd, c, errors = 0, run_ms = 15000, found_ms = -1, key_ms = 8000, pause_ms = -1, fw = 0, m1_paused = 0;
-    int slota = 0, slotb = 0, want_err = 0, osd_ms = -1, reset_ms = -1, key_from = 0, key2_from = -1, key2_every = 0, key2_until = 0, k2 = 0, key3_from = -1, key3_ms = 0, reglog_ms = -1;
+    int fd, c, errors = 0, run_ms = 15000, found_ms = -1, key_ms = 8000, pause_ms = -1, mouse_ms = -1, fw = 0, m1_paused = 0;
+    int slota = 0, slotb = 0, r800speed = 0, want_err = 0, osd_ms = -1, reset_ms = -1, key_from = 0, key2_from = -1, key2_every = 0, key2_until = 0, k2 = 0, key3_from = -1, key3_ms = 0, reglog_ms = -1;
     logic [8:0] key3 = 9'h174;
     logic [8:0] key = '0;
     bit         use_key, no_disk, tc_used, turbor_pause, expect_armed = 1;
@@ -676,11 +696,13 @@ initial begin
     void'($value$plusargs("satlog=%d", satlog_ms));
     use_key = $value$plusargs("key=%h", key);
     void'($value$plusargs("pause_ms=%d", pause_ms));
+    void'($value$plusargs("mouse_ms=%d", mouse_ms));
     void'($value$plusargs("osd_ms=%d", osd_ms));
     void'($value$plusargs("reset_ms=%d", reset_ms));
     expect_armed = reset_ms < 0;
     if ($value$plusargs("firmware=%d", fw)) status[26] = fw[0];
     if ($test$plusargs("border=1")) status[41] = 1;
+    if ($value$plusargs("r800speed=%d", r800speed)) status[56:55] = 2'(r800speed);   // 0 Real, 1 T-states, 2 10.7MHz
     if ($value$plusargs("slota=%d", slota)) status[20:17] = 4'(slota);
     if ($value$plusargs("slotb=%d", slotb)) status[32:29] = 4'(slotb);
     void'($value$plusargs("ch4_delay=%d", ch4_delay));
@@ -825,6 +847,14 @@ initial begin
             if (ms == osd_ms + 600) begin osd_status = 0; m1_paused = m1_all; $display("%0t %0d ms: OSD closed", $time, ms); end
             if (ms == osd_ms + 800) check_running("OSD closed", m1_paused, errors);
         end
+        if (mouse_ms >= 0 && ms == mouse_ms) begin
+            ps2_mouse = {~ps2_mouse[24], 8'd0, 8'd4, 8'h00};
+            $display("%0t %0d ms: mouse moves", $time, ms);
+        end
+        if (mouse_ms >= 0 && ms == mouse_ms + 100) begin
+            if (sys.MSX.devices.dev_psg.use_mouse) $display("ok   mouse on PSG port 1");
+            else begin $display("FAIL mouse ignored, PSG port 1 stays joystick"); errors++; end
+        end
         if (ms == reset_ms) begin
             $display("%0t %0d ms: Reset from the OSD", $time, ms);
             expect_armed = 0;
@@ -896,6 +926,7 @@ initial begin
         errors++; $display("FAIL sound output %0d .. %0d, expected a swing of %0d", audio_lo, audio_hi, audio_min);
     end
     if (audio_fd != 0) $fclose(audio_fd);
+    if (pcmlog_fd != 0) $fclose(pcmlog_fd);
     if (expect_txt != "") begin
         if (found_ms < 0) begin errors++; $display("FAIL \"%s\" not on the screen", expect_txt); end
         else $display("\"%s\" on the screen at %0d ms", expect_txt, found_ms);

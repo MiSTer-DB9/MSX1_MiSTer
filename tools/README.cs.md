@@ -11,6 +11,8 @@ Pomocné nástroje jádra MSX pro MiSTer. Zpět na [hlavní Readme](../Readme.md
 | [CreateKeyMap](CreateKeyMap/README.cs.md) | Vyrobí tabulky PS/2 → klávesnicová matice MSX | vývojáři |
 | [vdptest](vdptest/README.cs.md) | Testovací ROM pro časování VDP | vývojáři a testeři |
 | [miditest](miditest/README.cs.md) | Testovací ROM pro výstup MIDI (MT32-pi, MidiLink) | testeři |
+| [vdpcmd](vdpcmd/README.cs.md) | vdpcmd od bengalacka (rychlost příkazů VDP) jako ROM, bez MSX-DOS | vývojáři a testeři |
+| [pcmtest](pcmtest/README.cs.md) | PCM turbo R přehrávané jako ve hře Criterion, počítá přeskočené vzorky | vývojáři a testeři |
 
 ## Rychlý start pro uživatele
 
@@ -25,7 +27,7 @@ Na SD kartu do `/media/fat/games/MSX1/` zkopíruj tyto soubory:
 Postup:
 1. Nainstaluj Python 3.
 2. Dumpy BIOS/firmware ROM dej do `tools/CreateMSXpack/ROM/` (musíš si je obstarat sám;
-   v repozitáři jsou jen ROM C-BIOS).
+   v repozitáři jsou jen ROM C-BIOS a IPL ROM 1chipMSX (OCM)).
 3. V `tools/CreateMSXpack` spusť `python createComp.py` a `python createDev.py`; balíčky vzniknou
    v `MSX/`. Podrobnosti a význam hlášek na konzoli jsou v
    [README CreateMSXpack](CreateMSXpack/README.cs.md).
@@ -80,6 +82,25 @@ ROM je přeložená v repozitáři; nahraje se jako ROM hry do slotu A, nejlépe
 Spuštění: `sh tools/miditest/build.sh` (jen pro nový překlad).
 Dokumentace: [README](miditest/README.cs.md) | [README (EN)](miditest/README.md).
 
+### vdpcmd
+
+[vdpcmd](https://github.com/bengalack/vdpcmd) od bengalacka jako cartridge ROM (`vdpcmd.rom`):
+měří, kolik pixelů zvládne příkazový engine VDP za snímek, a porovná to se skutečnými stroji.
+Originální program pro DOS běží uvnitř ROM beze změny, MSX-DOS tedy není potřeba. ROM je
+přeložená v repozitáři; nahraje se jako ROM hry do slotu A.
+
+Spuštění: `sh tools/vdpcmd/build.sh` (jen pro nový překlad).
+Dokumentace: [README](vdpcmd/README.cs.md) | [README (EN)](vdpcmd/README.md).
+
+### pcmtest
+
+Testovací ROM (`pcmtest.rom`) pro PCM turbo R: přehrává zvuky hry Criterion jejím vlastním
+přehrávačem (časovač S1990, 7990 Hz, zpožděné vzorky přeskočí), volitelně se zátěží VDP, a ukáže,
+kolik vzorků přehrála a kolik přeskočila. Zvuky jsou z ROM hry a v repozitáři nejsou.
+
+Spuštění: `python tools/pcmtest/mkraw.py <ROM Criterion>`, pak `sh tools/pcmtest/build.sh`.
+Dokumentace: [README](pcmtest/README.cs.md) | [README (EN)](pcmtest/README.md).
+
 ## Pro vývojáře
 
 - **Nový model stroje nebo rozšiřující cartridge:** viz
@@ -87,9 +108,10 @@ Dokumentace: [README](miditest/README.cs.md) | [README (EN)](miditest/README.md)
   ([English](CreateMSXpack/DEVELOPERS.md)).
 - **Nové rozložení klávesnice:** [CreateKeyMap](CreateKeyMap/README.cs.md).
 - **Mapper konkrétní ROM (přepis) nebo nové jméno mapperu:** [CreateCRC](CreateCRC/README.cs.md).
-- **Kontrola časování VDP:** [vdptest](vdptest/README.cs.md).
+- **Kontrola časování VDP:** [vdptest](vdptest/README.cs.md), [vdpcmd](vdpcmd/README.cs.md).
 - **Kontrola výstupu MIDI:** [miditest](miditest/README.cs.md).
 
 Pythonové skripty používají jen standardní knihovnu, kromě ladicí pomůcky
-`CreateKeyMap/scancode_debugger.py` (potřebuje balíček `keyboard`). Skripty se musí spouštět
-z vlastní složky, protože datové soubory otevírají relativním jménem.
+`CreateKeyMap/scancode_debugger.py` (potřebuje balíček `keyboard`). `createKeyMap.py`,
+`createComp.py` a `createDev.py` se musí spouštět z vlastní složky, protože datové soubory
+otevírají relativním jménem.
